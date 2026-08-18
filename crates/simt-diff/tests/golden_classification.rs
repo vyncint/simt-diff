@@ -22,6 +22,7 @@ fn generator(oracle: ConstructionOracle, model: Option<ReferenceModel>) -> Gener
         launches: vec![Launch::one_block(32)],
         reference_model: model,
         documented_limitation: None,
+        expected_static: simt_diff::prediction::ExpectedStatic::Unspecified,
     }
 }
 

@@ -20,6 +20,7 @@ pub mod analyzer;
 pub mod classify;
 pub mod emit;
 pub mod oracle;
+pub mod prediction;
 pub mod records;
 pub mod runner_output;
 pub mod templates;
