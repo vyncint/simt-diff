@@ -4,16 +4,24 @@ name: scan
 #
 # The regression corpus records nine observations of reconverge's behaviour, each
 # with the version it was measured against. This workflow rebuilds reconverge
-# from `main` daily and re-runs them. A signature that moves is the whole point
+# from `main` hourly and re-runs them. A signature that moves is the whole point
 # of the corpus existing: it means the analyzer changed, and the change is either
 # news to celebrate or news to file.
+#
+# Hourly is affordable because the expensive part is cached: the analyzer build
+# is keyed on reconverge's commit, so an unchanged `main` restores it and only
+# the nine entries are re-analyzed. It is also only useful because drift is
+# reported once per drifting commit rather than once per run — at this cadence a
+# per-run report would be two dozen copies of the same issue in a day.
 #
 # The fast, sharp signal lives here. The full launch matrix is weekly, in
 # scan-matrix.yml, because it costs twenty minutes rather than one.
 
 on:
   schedule:
-    - cron: "23 5 * * *"
+    # Offset from the top of the hour: :00 is the most contended slot on
+    # GitHub's scheduler, and a delayed scan is a scan that reports late.
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       ref:
