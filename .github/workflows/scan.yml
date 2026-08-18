@@ -21,7 +21,7 @@ on:
   schedule:
     # Offset from the top of the hour: :00 is the most contended slot on
     # GitHub's scheduler, and a delayed scan is a scan that reports late.
-    - cron: "23 * * * *"
+    - cron: "28 * * * *"
   workflow_dispatch:
     inputs:
       ref:
