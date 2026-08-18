@@ -23,6 +23,7 @@ fn generator(oracle: ConstructionOracle, model: Option<ReferenceModel>) -> Gener
         reference_model: model,
         documented_limitation: None,
         expected_static: simt_diff::prediction::ExpectedStatic::Unspecified,
+        prediction_basis: None,
     }
 }
 
@@ -333,4 +334,25 @@ fn repeated_identical_mismatches_are_collapsed_into_one_line() {
         "the collapsed line should name the lane range: {:?}",
         out.observed
     );
+}
+
+#[test]
+fn a_safe_kernel_the_analyzer_is_silent_about_is_agreement_even_with_no_gpu_run() {
+    // The static half of this laboratory runs on a laptop, and most of what it
+    // produces is this shape. Calling it inconclusive would report every clean
+    // case in a GPU-less sweep as an open question -- while the same kernel with
+    // a *warning* on it was already being called agreement, which was
+    // inconsistent.
+    let g = generator(ConstructionOracle::KnownSafe, None);
+    let a = analyzer(vec![]);
+    assert_eq!(verdict(&g, &a, &[], &[]), Classification::AgreementSafe);
+}
+
+#[test]
+fn an_unsafe_kernel_nothing_corroborates_stays_inconclusive_with_no_gpu_run() {
+    // The contrast that makes the rule above safe: here the open question really
+    // is the dynamic one, so silence plus no run resolves nothing.
+    let g = generator(ConstructionOracle::KnownUnsafe, None);
+    let a = analyzer(vec![]);
+    assert_eq!(verdict(&g, &a, &[], &[]), Classification::DynamicInconclusive);
 }

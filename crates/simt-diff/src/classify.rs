@@ -397,10 +397,25 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
             interpretation, not_claimed,
         );
     }
+    // A static-only sweep can still settle this branch: construction says the
+    // kernel is fine and the analyzer agrees, which is agreement whether or not
+    // a GPU was involved. `DynamicInconclusive` is for the case above, where the
+    // open question *is* the dynamic one -- construction says invalid and only a
+    // run could corroborate it. Answering "inconclusive" here instead would have
+    // labelled every clean case in a laptop sweep as unresolved.
     if ev.runs.is_empty() {
-        interpretation.push("no dynamic evidence was collected".into());
+        interpretation.push(
+            "construction and the analyzer agree the kernel is fine; no launch \
+             was executed, and none is needed to say that"
+                .into(),
+        );
+        not_claimed.push(
+            "anything about hardware behaviour, or about launches outside the \
+             one analyzed"
+                .into(),
+        );
         return done(
-            Classification::DynamicInconclusive, oracle, strengths, observed,
+            Classification::AgreementSafe, oracle, strengths, observed,
             interpretation, not_claimed,
         );
     }

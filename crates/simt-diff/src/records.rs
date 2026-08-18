@@ -63,6 +63,25 @@ pub struct GeneratorRecord {
     /// construct, declared by the template and checked after the run.
     #[serde(default = "unspecified_prediction")]
     pub expected_static: crate::prediction::ExpectedStatic,
+    /// For generated cases: which rule produced `expected_static`, how well
+    /// documented that rule is, and which mutations built the kernel.
+    ///
+    /// Absent for the hand-written templates, whose predictions were declared
+    /// one by one. Present for everything the mutation engine emits, because a
+    /// violation means something different depending on whether the rule was
+    /// quoted from the analyzer's documentation or inferred from it.
+    #[serde(default)]
+    pub prediction_basis: Option<PredictionBasis>,
+}
+
+/// Why a generated case predicts what it predicts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PredictionBasis {
+    pub rule: String,
+    pub provenance: crate::model::Provenance,
+    /// The operators applied, in order, to reach this kernel.
+    pub mutation_lineage: Vec<String>,
+    pub seed_template: String,
 }
 
 fn unspecified_prediction() -> crate::prediction::ExpectedStatic {

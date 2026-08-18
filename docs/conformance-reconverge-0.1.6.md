@@ -43,3 +43,26 @@ mutation engine and the launch matrix are what would widen it, and neither
 exists yet.
 
 **No bug was found.** That is the result, not a preamble to one.
+
+## Refined by Stage 4
+
+The fourteen measured rows above stand unchanged, and
+[`tests/ir_seeds.rs`](../crates/simt-diff/tests/ir_seeds.rs) now holds the
+mutation engine to reproducing every one of them. Two things written here read
+differently in hindsight:
+
+1. **"The mutation engine and the launch matrix are what would widen it, and
+   neither exists yet."** The engine exists now, and widening the corpus to 144
+   generated kernels found five places where reconverge's behaviour and its
+   documentation differ — three of them because the tool is *better* than
+   documented. See [`stage-4.md`](stage-4.md). The launch matrix still does not
+   exist.
+2. **`barrier_guarded_by_warp_id` is labelled `KNOWN_UNSAFE` above, and at
+   `block=32` that is wrong.** Its own justification — "whole warps skip the
+   block barrier" — needs more than one warp, and every row here was measured at
+   one. The analyzer's behaviour is unaffected and the row still holds; what was
+   wrong is a construction label asserted once for a property that depends on the
+   launch. Stage 4 computes it per launch instead.
+
+**"No bug was found" also stands, for this corpus.** It did not survive contact
+with the generated one.

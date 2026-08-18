@@ -155,10 +155,8 @@ fn collect_witnesses(kernel_crate: &Path) -> Vec<String> {
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|n| n.starts_with("witness-") && n.ends_with(".json"));
-        if is_witness {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push(text);
-            }
+        if is_witness && let Ok(text) = std::fs::read_to_string(&path) {
+            out.push(text);
         }
     }
     out.sort();

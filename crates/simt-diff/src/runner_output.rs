@@ -7,10 +7,14 @@
 
 use std::collections::BTreeMap;
 
+/// What a runner's stdout carried: the block size it reported, and the per-lane
+/// values, either of which may be absent.
+pub type RunnerOutput = (Option<u32>, Option<BTreeMap<u32, u32>>);
+
 use crate::records::RunOutcome;
 
 /// Returns the block size, if the runner printed one, and the per-lane values.
-pub fn parse(text: &str) -> Result<(Option<u32>, Option<BTreeMap<u32, u32>>), String> {
+pub fn parse(text: &str) -> Result<RunnerOutput, String> {
     let mut block = None;
     let mut values = None;
     for line in text.lines() {
@@ -56,7 +60,7 @@ pub fn outcome_from_str(s: &str) -> Result<RunOutcome, String> {
 pub fn parse_sanitizer(raw: &str) -> (bool, Option<u32>) {
     for line in raw.lines() {
         if let Some(rest) = line.split("ERROR SUMMARY:").nth(1) {
-            let n: Option<u32> = rest.trim().split_whitespace().next().and_then(|t| t.parse().ok());
+            let n: Option<u32> = rest.split_whitespace().next().and_then(|t| t.parse().ok());
             return (n.is_some_and(|n| n > 0), n);
         }
     }

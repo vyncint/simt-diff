@@ -19,6 +19,10 @@
 pub mod analyzer;
 pub mod classify;
 pub mod emit;
+pub mod interpret;
+pub mod ir;
+pub mod model;
+pub mod mutate;
 pub mod oracle;
 pub mod prediction;
 pub mod records;
