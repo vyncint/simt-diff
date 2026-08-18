@@ -1,0 +1,261 @@
+//! Case emission: one directory per case, holding both crates.
+//!
+//! Two crates, because the analyzer and the GPU need different shapes and
+//! the baseline (§ "Architecture consequence") established that the runner's
+//! host dependencies cannot even build on a machine without the CUDA driver:
+//!
+//! - `kernel/` — a lib crate depending on `cuda-device` alone. This is the
+//!   shape reconverge's own fixtures use, and it analyzes anywhere.
+//! - `runner/` — a bin crate adding `cuda-core`/`cuda-host` and a host
+//!   `main`. Built and executed only on a GPU host.
+//!
+//! Both embed the same kernel text, and `kernel_sha256` in the generator
+//! record proves it.
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use crate::records::{GeneratorRecord, Launch};
+
+/// Where the device-side dependencies come from. Recorded per case so a
+/// reproduction can pin the same surface.
+#[derive(Clone, Debug)]
+pub enum DeviceDep {
+    /// A pinned upstream revision. Portable: analyzable on any host.
+    Git { git: String, rev: String },
+    /// Relative path into a cuda-oxide checkout. Required for the runner
+    /// crate, because `cargo oxide build` needs the backend from the
+    /// checkout it was built in.
+    Path { crates_dir: String },
+}
+
+impl DeviceDep {
+    fn spec(&self, crate_name: &str) -> String {
+        match self {
+            DeviceDep::Git { git, rev } => {
+                format!("{{ git = \"{git}\", rev = \"{rev}\" }}")
+            }
+            DeviceDep::Path { crates_dir } => {
+                format!("{{ path = \"{crates_dir}/{crate_name}\" }}")
+            }
+        }
+    }
+
+    /// How this dependency should be recorded in the case metadata.
+    pub fn provenance(&self) -> String {
+        match self {
+            DeviceDep::Git { git, rev } => format!("{git}@{rev}"),
+            DeviceDep::Path { crates_dir } => format!("path:{crates_dir}"),
+        }
+    }
+}
+
+impl Default for DeviceDep {
+    fn default() -> Self {
+        // The revision reconverge's own conformance suite pins
+        // (`conformance/PIN`), so a case analyzed here sees the same
+        // cuda-device surface the analyzer was calibrated against.
+        DeviceDep::Git {
+            git: "https://github.com/NVlabs/cuda-oxide".to_string(),
+            rev: "a766fc2650ea8e9e56c1481698b5dfdf01c31ded".to_string(),
+        }
+    }
+}
+
+pub struct CaseLayout {
+    pub root: PathBuf,
+    pub kernel_crate: PathBuf,
+    pub runner_crate: PathBuf,
+}
+
+/// Write a case to disk. Returns the layout so callers do not rebuild paths.
+///
+/// The two crates take **different** dependency specs on purpose. The kernel
+/// crate always uses a pinned revision so it analyzes on any host, including
+/// one with no CUDA at all; only the runner may use path deps, because
+/// `cargo oxide build` needs the backend from the checkout it was built in.
+/// Wiring both to a path breaks analysis on the controller, which is how this
+/// separation was discovered.
+pub fn emit(
+    root: &Path,
+    record: &GeneratorRecord,
+    kernel_dep: &DeviceDep,
+    runner_dep: &DeviceDep,
+) -> io::Result<CaseLayout> {
+    let kernel_crate = root.join("kernel");
+    let runner_crate = root.join("runner");
+    fs::create_dir_all(kernel_crate.join("src"))?;
+    fs::create_dir_all(runner_crate.join("src"))?;
+
+    fs::write(
+        kernel_crate.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"case-kernel\"\nversion = \"0.0.0\"\n\
+             edition = \"2024\"\npublish = false\n\n\
+             # Standalone on purpose: analyzed exactly the way a user's kernel\n\
+             # crate is. Kernel-only surface, so no host runtime and no driver.\n\
+             [workspace]\n\n[dependencies]\n\
+             cuda-device = {}\n",
+            kernel_dep.spec("cuda-device")
+        ),
+    )?;
+    fs::write(kernel_crate.join("src/lib.rs"), &record.kernel_source)?;
+
+    fs::write(
+        runner_crate.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"case-runner\"\nversion = \"0.0.0\"\n\
+             edition = \"2024\"\npublish = false\n\n[workspace]\n\n\
+             [dependencies]\n\
+             cuda-device = {}\n\
+             cuda-host = {}\n\
+             cuda-core = {}\n",
+            runner_dep.spec("cuda-device"),
+            runner_dep.spec("cuda-host"),
+            runner_dep.spec("cuda-core")
+        ),
+    )?;
+    fs::write(runner_crate.join("src/main.rs"), runner_main(record))?;
+    Ok(CaseLayout { root: root.to_path_buf(), kernel_crate, runner_crate })
+}
+
+/// The host program. It prints one `VALUES=` line so the comparison engine
+/// can read back per-lane values -- which the baseline's §9.5 showed is the
+/// only channel that distinguishes a valid mask from an invalid one.
+fn runner_main(record: &GeneratorRecord) -> String {
+    let default_block = record
+        .launches
+        .first()
+        .map_or(32, |l: &Launch| l.block.0);
+    format!(
+        r#"//! Generated by {version}. Do not edit.
+//!
+//! Host runner for case template `{template}`. Prints per-lane values so the
+//! differential engine can compare them against the template's reference
+//! model; exit code alone is not evidence.
+
+use cuda_core::{{CudaContext, DeviceBuffer, LaunchConfig1D}};
+
+{kernel_source_as_module}
+
+fn main() {{
+    let block: u32 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or({default_block});
+    let n = block as usize;
+
+    let ctx = CudaContext::new(0).expect("cuda context");
+    let stream = ctx.default_stream();
+    let mut out = DeviceBuffer::<u32>::zeroed(&stream, n).expect("alloc");
+    // SAFETY: this package owns the embedded device bundle for `kernels`.
+    // `load` is unsafe on current upstream; the `allow` keeps the generated
+    // runner compiling against revisions where it is not.
+    #[allow(unused_unsafe)]
+    let module = unsafe {{ kernels::load(&ctx) }}.expect("load embedded module");
+
+    // A kernel carrying `#[launch_contract]` is launched through the prepared
+    // path: the contract is checked against the configuration first, and the
+    // typed method then takes the `PreparedLaunch`. Read out of upstream's
+    // `coop_groups_demo`, not assumed.
+    let config = LaunchConfig1D::new(1, block, 0);
+    let prepared = module
+        .prepare_probe(config)
+        .expect("launch configuration violates the kernel's contract");
+    // SAFETY: one block of `block` threads; `out` covers every lane's write.
+    unsafe {{ module.probe(&stream, &prepared, &mut out) }}.expect("launch");
+    let host = out.to_host_vec(&stream).expect("copy back");
+
+    println!("BLOCK={{block}}");
+    print!("VALUES=");
+    for (i, v) in host.iter().enumerate() {{
+        if i > 0 {{
+            print!(",");
+        }}
+        print!("{{v}}");
+    }}
+    println!();
+}}
+"#,
+        version = crate::templates::GENERATOR_VERSION,
+        template = record.template_id,
+        default_block = default_block,
+        kernel_source_as_module = wrap_in_cuda_module(&record.kernel_source),
+    )
+}
+
+/// The runner needs the kernel inside a `#[cuda_module]` so the host-side
+/// typed launch API is generated; the analysis crate does not. The kernel
+/// text itself is unchanged -- only the wrapper differs.
+fn wrap_in_cuda_module(kernel_source: &str) -> String {
+    let body: String = kernel_source
+        .lines()
+        .filter(|l| !l.starts_with("//!") && !l.starts_with("use cuda_device::"))
+        .map(|l| format!("    {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "use cuda_device::{{DisjointSlice, cuda_module, kernel, launch_contract, thread, warp}};\n\
+         \n\
+         #[cuda_module]\n\
+         mod kernels {{\n\
+         \x20   use super::*;\n\
+         {body}\n\
+         }}\n"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::records::Launch;
+    use crate::templates;
+
+    #[test]
+    fn both_crates_embed_the_same_kernel_text() {
+        let t = templates::find("mask_shrunk_convergent").unwrap();
+        let record = t.record(1, vec![Launch::one_block(32)]);
+        let runner = runner_main(&record);
+        // The distinguishing line of the kernel must appear verbatim in the
+        // runner, or the two artifacts are not the same program.
+        assert!(
+            runner.contains("warp::ballot_sync(0x0000_ffff, true)"),
+            "runner lost the kernel body:\n{runner}"
+        );
+        assert!(record.kernel_source.contains("warp::ballot_sync(0x0000_ffff, true)"));
+    }
+
+    #[test]
+    fn the_kernel_crate_never_inherits_the_runner_path_dep() {
+        // Regression: wiring both crates to a path dep made `cargo metadata`
+        // fail on the controller, so the analyzer exited 2 and every case
+        // classified as AnalyzerError.
+        let dir = std::env::temp_dir().join(format!("simt-diff-emit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let t = templates::find("mask_full_convergent").unwrap();
+        let record = t.record(1, vec![Launch::one_block(32)]);
+        emit(
+            &dir,
+            &record,
+            &DeviceDep::default(),
+            &DeviceDep::Path { crates_dir: "../../..".into() },
+        )
+        .unwrap();
+        let kernel = std::fs::read_to_string(dir.join("kernel/Cargo.toml")).unwrap();
+        let runner = std::fs::read_to_string(dir.join("runner/Cargo.toml")).unwrap();
+        assert!(kernel.contains("git ="), "kernel crate must stay portable:\n{kernel}");
+        assert!(!kernel.contains("path ="), "kernel crate must not take a path dep");
+        assert!(runner.contains("path ="), "runner crate should take the path dep");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_runner_prints_values_not_just_a_status() {
+        let t = templates::find("mask_full_convergent").unwrap();
+        let record = t.record(1, vec![Launch::one_block(64)]);
+        let runner = runner_main(&record);
+        assert!(runner.contains("VALUES="));
+        assert!(runner.contains("unwrap_or(64)"), "default block comes from the launch");
+    }
+}

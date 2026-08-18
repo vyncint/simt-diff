@@ -1,0 +1,5 @@
+# Matches reconverge and upstream cuda-oxide. A rustc-driver tool must be
+# built by the exact rustc it wraps, and this workspace shells out to one.
+[toolchain]
+channel = "nightly-2026-04-03"
+components = ["rustfmt", "clippy"]
