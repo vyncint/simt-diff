@@ -1,66 +1,117 @@
 name: Build the analyzer under test
 description: >
-  Check out reconverge at a given ref, build cargo-reconverge and its driver on
-  the pinned nightly, and report the binary path and the exact commit scanned.
+  Obtain a cargo-reconverge to test against, either a published version from
+  crates.io or a git ref, and report which one it actually is.
 
 inputs:
-  ref:
-    description: reconverge ref to scan (branch, tag or SHA)
+  version:
+    description: >
+      Published version to install, or "latest" for the newest on crates.io.
+      Ignored when `ref` is set.
     required: false
-    default: main
+    default: latest
+  ref:
+    description: >
+      git ref to build instead of installing a release. Use for investigating a
+      change that is not published yet; a published version is otherwise the
+      better target, because it is immutable and nameable in a corpus entry.
+    required: false
+    default: ""
 
 outputs:
   bin:
     description: Absolute path to the cargo-reconverge binary
-    value: ${{ steps.build.outputs.bin }}
-  sha:
-    description: The reconverge commit actually scanned
-    value: ${{ steps.checkout.outputs.sha }}
+    value: ${{ steps.resolve.outputs.bin }}
   version:
-    description: reconverge's workspace version at that commit
-    value: ${{ steps.build.outputs.version }}
+    description: The version actually under test
+    value: ${{ steps.resolve.outputs.version }}
+  source:
+    description: "`crates.io` or `git`, and the exact version or commit"
+    value: ${{ steps.resolve.outputs.source }}
 
 runs:
   using: composite
   steps:
-    - id: checkout
-      shell: bash
-      run: |
-        git clone --quiet https://github.com/vyncint/reconverge.git "$RUNNER_TEMP/reconverge"
-        cd "$RUNNER_TEMP/reconverge"
-        git checkout --quiet "${{ inputs.ref }}"
-        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-        echo "scanning reconverge $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
-
-    # A rustc-driver tool must be built by the exact rustc it wraps, and both
-    # repositories pin the same nightly. Installing from reconverge's own
-    # rust-toolchain.toml is what keeps that true if either pin moves.
+    # The pinned nightly comes from THIS repository, deliberately. A published
+    # crate carries no toolchain file that `cargo install` would honour, so the
+    # pin has to come from somewhere; ours is the one every recorded observation
+    # was made with. If reconverge moves its pin, the install fails loudly rather
+    # than silently testing a mismatched driver.
     - shell: bash
-      working-directory: ${{ runner.temp }}/reconverge
       run: |
         rustup toolchain install
         rustup show
 
-    # First-party cache on purpose: this workflow builds a third party's code on
-    # a schedule, so the action surface stays as small as the rest of the repo's.
+    - id: pick
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        REF: ${{ inputs.ref }}
+      run: |
+        if [ -n "$REF" ]; then
+          echo "mode=git" >> "$GITHUB_OUTPUT"
+          echo "want=$REF" >> "$GITHUB_OUTPUT"
+        elif [ "$VERSION" = "latest" ]; then
+          latest=$(curl -sSf https://crates.io/api/v1/crates/cargo-reconverge \
+            -H "User-Agent: simt-diff scan (github.com/vyncint/simt-diff)" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_stable_version"])')
+          test -n "$latest" || { echo "could not resolve the latest version" >&2; exit 1; }
+          echo "mode=crates" >> "$GITHUB_OUTPUT"
+          echo "want=$latest" >> "$GITHUB_OUTPUT"
+          echo "latest published version is $latest"
+        else
+          echo "mode=crates" >> "$GITHUB_OUTPUT"
+          echo "want=$VERSION" >> "$GITHUB_OUTPUT"
+        fi
+
+    # First-party cache on purpose: this runs someone else's code on a timer, so
+    # the action surface stays as small as the rest of the repo's. Keyed on the
+    # exact version or commit, so a new one is never served a stale binary.
     - uses: actions/cache@v4
       with:
         path: |
-          ${{ runner.temp }}/reconverge/target
+          ~/.analyzer
           ~/.cargo/registry
           ~/.cargo/git
-        key: analyzer-${{ runner.os }}-${{ steps.checkout.outputs.sha }}
+        key: analyzer-${{ runner.os }}-${{ steps.pick.outputs.mode }}-${{ steps.pick.outputs.want }}
         restore-keys: |
-          analyzer-${{ runner.os }}-
+          analyzer-${{ runner.os }}-${{ steps.pick.outputs.mode }}-
 
-    - id: build
+    - id: resolve
       shell: bash
-      working-directory: ${{ runner.temp }}/reconverge
+      env:
+        MODE: ${{ steps.pick.outputs.mode }}
+        WANT: ${{ steps.pick.outputs.want }}
       run: |
-        cargo build --release -p cargo-reconverge -p reconverge-driver
-        bin="$PWD/target/release/cargo-reconverge"
-        test -x "$bin" || { echo "cargo-reconverge did not build" >&2; exit 1; }
+        root="$HOME/.analyzer"
+        bin="$root/bin/cargo-reconverge"
+
+        if [ "$MODE" = "crates" ]; then
+          # --locked: build the dependency versions the release was published
+          # with, not whatever resolves today.
+          if [ ! -x "$bin" ] || ! "$bin" reconverge --version 2>/dev/null | grep -qF "$WANT"; then
+            cargo install --locked --version "$WANT" --root "$root" \
+              cargo-reconverge reconverge-driver
+          else
+            echo "cached install of $WANT is usable"
+          fi
+          version="$WANT"
+          source="crates.io $WANT"
+        else
+          git clone --quiet https://github.com/vyncint/reconverge.git "$RUNNER_TEMP/reconverge"
+          cd "$RUNNER_TEMP/reconverge"
+          git checkout --quiet "$WANT"
+          sha=$(git rev-parse HEAD)
+          echo "building reconverge $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
+          cargo build --release -p cargo-reconverge -p reconverge-driver
+          mkdir -p "$root/bin"
+          cp target/release/cargo-reconverge target/release/reconverge-driver "$root/bin/"
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          source="git $sha"
+        fi
+
+        test -x "$bin" || { echo "no cargo-reconverge at $bin" >&2; exit 1; }
         echo "bin=$bin" >> "$GITHUB_OUTPUT"
-        version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
         echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "built cargo-reconverge $version"
+        echo "source=$source" >> "$GITHUB_OUTPUT"
+        echo "under test: $source (version $version)"

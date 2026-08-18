@@ -4,9 +4,16 @@ name: scan
 #
 # The regression corpus records nine observations of reconverge's behaviour, each
 # with the version it was measured against. This workflow rebuilds reconverge
-# from `main` hourly and re-runs them. A signature that moves is the whole point
-# of the corpus existing: it means the analyzer changed, and the change is either
-# news to celebrate or news to file.
+# hourly against the newest *published* version and re-runs them. A signature
+# that moves is the whole point of the corpus existing: it means the analyzer
+# changed, and the change is either news to celebrate or news to file.
+#
+# A release rather than `main`, for one reason that matters: a version is a name.
+# "0.1.12 promotes this and 0.1.6 did not" is a claim anyone can check years from
+# now; "main did, on a Tuesday" is not. Corpus entries record the version they
+# were measured against, so the target has to be nameable in the same terms. A
+# git ref stays available on manual dispatch, for investigating something not yet
+# released.
 #
 # Hourly is affordable because the expensive part is cached: the analyzer build
 # is keyed on reconverge's commit, so an unchanged `main` restores it and only
@@ -24,10 +31,14 @@ on:
     - cron: "28 * * * *"
   workflow_dispatch:
     inputs:
-      ref:
-        description: reconverge ref to scan
+      version:
+        description: published version to scan, or "latest"
         required: false
-        default: main
+        default: latest
+      ref:
+        description: git ref to scan instead of a published version
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -45,7 +56,8 @@ jobs:
       - id: analyzer
         uses: ./.github/actions/analyzer
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          version: ${{ inputs.version || 'latest' }}
+          ref: ${{ inputs.ref }}
 
       - name: Materialize this repository's toolchain
         run: |
@@ -72,11 +84,11 @@ jobs:
       - name: Summarize
         if: always()
         env:
-          SHA: ${{ steps.analyzer.outputs.sha }}
+          SOURCE: ${{ steps.analyzer.outputs.source }}
           VERSION: ${{ steps.analyzer.outputs.version }}
         run: |
           {
-            echo "## Scan of reconverge \`${SHA:0:12}\` (version $VERSION)"
+            echo "## Scan of reconverge $SOURCE"
             echo
             echo '```'
             tail -n 40 regress.txt 2>/dev/null || echo "no regress output"
@@ -86,7 +98,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: regress-${{ steps.analyzer.outputs.sha }}
+          name: regress-${{ steps.analyzer.outputs.version }}
           path: regress.txt
           if-no-files-found: warn
 
@@ -97,20 +109,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ steps.analyzer.outputs.sha }}
+          SOURCE: ${{ steps.analyzer.outputs.source }}
           VERSION: ${{ steps.analyzer.outputs.version }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          short="${SHA:0:12}"
-          title="scan: corpus drift against reconverge $short"
-          if gh issue list --repo "$REPO" --state all --search "\"$short\" in:title" --json title --jq '.[].title' | grep -qF "$title"; then
-            echo "already filed for $short"
+          title="scan: corpus drift against reconverge $VERSION"
+          if gh issue list --repo "$REPO" --state all --search "\"$VERSION\" in:title" --json title --jq '.[].title' | grep -qF "$title"; then
+            echo "already filed for $VERSION"
             exit 0
           fi
           {
             echo "A scheduled scan found a recorded observation that no longer holds."
             echo
-            echo "- reconverge commit: \`$SHA\` (version \`$VERSION\`)"
+            echo "- analyzer under test: \`$SOURCE\`"
             echo "- run: $RUN"
             echo
             echo "\`ANALYZER DRIFT\` means the same program now gets a different answer, which is"
