@@ -32,7 +32,11 @@ fn analyzer(findings: Vec<(&str, Confidence)>) -> AnalyzerRecord {
         tool: "reconverge".into(),
         version: "0.1.6".into(),
         command: vec!["cargo".into(), "reconverge".into(), "check".into()],
-        exit_code: Some(if findings.iter().any(|(_, c)| c.gates()) { 1 } else { 0 }),
+        exit_code: Some(if findings.iter().any(|(_, c)| c.gates()) {
+            1
+        } else {
+            0
+        }),
         findings: findings
             .into_iter()
             .map(|(code, confidence)| Finding {
@@ -95,7 +99,13 @@ fn verdict(
     r: &[GpuRunRecord],
     s: &[SanitizerRecord],
 ) -> Classification {
-    classify(&Evidence { generator: g, analyzer: a, runs: r, sanitizer: s }).classification
+    classify(&Evidence {
+        generator: g,
+        analyzer: a,
+        runs: r,
+        sanitizer: s,
+    })
+    .classification
 }
 
 // ---- the four cases the brief's §46 requires ---------------------------
@@ -206,7 +216,10 @@ fn the_invalid_mask_is_caught_only_by_the_reference_model() {
     // Baseline §9.5: ballot_sync(0x0000ffff) with 32 lanes present returns
     // 0xffffffff -- byte-identical to the valid case. The value comparison
     // is the only source that sees it.
-    let g = generator(ConstructionOracle::KnownMaskInvalid, Some(model(0x0000_ffff)));
+    let g = generator(
+        ConstructionOracle::KnownMaskInvalid,
+        Some(model(0x0000_ffff)),
+    );
     let a = analyzer(vec![]);
     let r = [run(RunOutcome::Completed, Some(lanes(0xffff_ffff)))];
     assert_eq!(
@@ -249,7 +262,10 @@ fn instrumentation_disagreement_is_never_blamed_on_the_analyzer() {
         reported: false,
         ..sanitizer(false)
     }];
-    assert_eq!(verdict(&g, &a, &r, &s), Classification::InstrumentationConflict);
+    assert_eq!(
+        verdict(&g, &a, &r, &s),
+        Classification::InstrumentationConflict
+    );
 }
 
 #[test]
@@ -298,7 +314,10 @@ fn a_documented_limitation_is_unsupported_not_a_false_negative() {
     // The shrunk-mask class is published at 0% recall in reconverge's own
     // conformance corpus. Filing it as a false negative would be filing a
     // bug against a stated limitation.
-    let mut g = generator(ConstructionOracle::KnownMaskInvalid, Some(model(0x0000_ffff)));
+    let mut g = generator(
+        ConstructionOracle::KnownMaskInvalid,
+        Some(model(0x0000_ffff)),
+    );
     g.documented_limitation = Some("MUTATION.md shrinkmask row: expected recall 0".into());
     let a = analyzer(vec![]);
     let r = [run(RunOutcome::Completed, Some(lanes(0xffff_ffff)))];
@@ -312,7 +331,10 @@ fn a_documented_limitation_is_unsupported_not_a_false_negative() {
 fn without_the_limitation_the_same_evidence_is_a_false_negative() {
     // The contrapositive: the limitation, not the evidence, is what makes
     // the difference -- so it must be declared per template, deliberately.
-    let g = generator(ConstructionOracle::KnownMaskInvalid, Some(model(0x0000_ffff)));
+    let g = generator(
+        ConstructionOracle::KnownMaskInvalid,
+        Some(model(0x0000_ffff)),
+    );
     let a = analyzer(vec![]);
     let r = [run(RunOutcome::Completed, Some(lanes(0xffff_ffff)))];
     assert_eq!(
@@ -323,11 +345,23 @@ fn without_the_limitation_the_same_evidence_is_a_false_negative() {
 
 #[test]
 fn repeated_identical_mismatches_are_collapsed_into_one_line() {
-    let g = generator(ConstructionOracle::KnownMaskInvalid, Some(model(0x0000_ffff)));
+    let g = generator(
+        ConstructionOracle::KnownMaskInvalid,
+        Some(model(0x0000_ffff)),
+    );
     let a = analyzer(vec![]);
     let r = [run(RunOutcome::Completed, Some(lanes(0xffff_ffff)))];
-    let out = classify(&Evidence { generator: &g, analyzer: &a, runs: &r, sanitizer: &[] });
-    let value_lines = out.observed.iter().filter(|o| o.starts_with("value:")).count();
+    let out = classify(&Evidence {
+        generator: &g,
+        analyzer: &a,
+        runs: &r,
+        sanitizer: &[],
+    });
+    let value_lines = out
+        .observed
+        .iter()
+        .filter(|o| o.starts_with("value:"))
+        .count();
     assert_eq!(value_lines, 1, "32 identical lines is noise, not evidence");
     assert!(
         out.observed.iter().any(|o| o.contains("0..=31")),
@@ -354,5 +388,8 @@ fn an_unsafe_kernel_nothing_corroborates_stays_inconclusive_with_no_gpu_run() {
     // is the dynamic one, so silence plus no run resolves nothing.
     let g = generator(ConstructionOracle::KnownUnsafe, None);
     let a = analyzer(vec![]);
-    assert_eq!(verdict(&g, &a, &[], &[]), Classification::DynamicInconclusive);
+    assert_eq!(
+        verdict(&g, &a, &[], &[]),
+        Classification::DynamicInconclusive
+    );
 }

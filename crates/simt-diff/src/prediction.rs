@@ -41,12 +41,12 @@ pub enum ExpectedStaticSpec {
 impl From<ExpectedStaticSpec> for ExpectedStatic {
     fn from(spec: ExpectedStaticSpec) -> Self {
         match spec {
-            ExpectedStaticSpec::Gating(code) => {
-                ExpectedStatic::Gating { code: code.to_string() }
-            }
-            ExpectedStaticSpec::WarningOnly(code) => {
-                ExpectedStatic::WarningOnly { code: code.to_string() }
-            }
+            ExpectedStaticSpec::Gating(code) => ExpectedStatic::Gating {
+                code: code.to_string(),
+            },
+            ExpectedStaticSpec::WarningOnly(code) => ExpectedStatic::WarningOnly {
+                code: code.to_string(),
+            },
             ExpectedStaticSpec::Silent => ExpectedStatic::Silent,
             ExpectedStaticSpec::Unspecified => ExpectedStatic::Unspecified,
         }
@@ -165,7 +165,11 @@ pub fn check(expected: &ExpectedStatic, analyzer: &AnalyzerRecord) -> Prediction
         };
     }
 
-    PredictionReport { expected: expected.clone(), outcome, detail }
+    PredictionReport {
+        expected: expected.clone(),
+        outcome,
+        detail,
+    }
 }
 
 #[cfg(test)]
@@ -215,7 +219,9 @@ mod tests {
     #[test]
     fn warning_only_promoted_to_confirmed_is_a_violation() {
         let r = check(
-            &ExpectedStatic::WarningOnly { code: "RC001".into() },
+            &ExpectedStatic::WarningOnly {
+                code: "RC001".into(),
+            },
             &record(vec![("RC001", Confidence::Confirmed)], 1),
         );
         assert_eq!(r.outcome, PredictionOutcome::Violated);
@@ -226,7 +232,12 @@ mod tests {
     fn warning_only_not_seen_at_all_is_also_a_violation() {
         // The opposite direction, and just as informative: the documented
         // rule says the construct is seen and held back, not missed.
-        let r = check(&ExpectedStatic::WarningOnly { code: "RC001".into() }, &record(vec![], 0));
+        let r = check(
+            &ExpectedStatic::WarningOnly {
+                code: "RC001".into(),
+            },
+            &record(vec![], 0),
+        );
         assert_eq!(r.outcome, PredictionOutcome::Violated);
         assert!(r.detail.contains("not seen at all"));
     }
@@ -234,7 +245,9 @@ mod tests {
     #[test]
     fn warning_only_with_a_witness_is_a_violation_even_at_warning_tier() {
         let r = check(
-            &ExpectedStatic::WarningOnly { code: "RC001".into() },
+            &ExpectedStatic::WarningOnly {
+                code: "RC001".into(),
+            },
             &record(vec![("RC001", Confidence::Warning)], 1),
         );
         assert_eq!(r.outcome, PredictionOutcome::Violated);
@@ -243,7 +256,9 @@ mod tests {
     #[test]
     fn gating_predicted_and_delivered() {
         let r = check(
-            &ExpectedStatic::Gating { code: "RC001".into() },
+            &ExpectedStatic::Gating {
+                code: "RC001".into(),
+            },
             &record(vec![("RC001", Confidence::Confirmed)], 1),
         );
         assert_eq!(r.outcome, PredictionOutcome::Held);
@@ -252,7 +267,9 @@ mod tests {
     #[test]
     fn gating_predicted_but_only_a_warning_arrived() {
         let r = check(
-            &ExpectedStatic::Gating { code: "RC001".into() },
+            &ExpectedStatic::Gating {
+                code: "RC001".into(),
+            },
             &record(vec![("RC001", Confidence::Warning)], 0),
         );
         assert_eq!(r.outcome, PredictionOutcome::Violated);

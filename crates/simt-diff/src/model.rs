@@ -199,7 +199,9 @@ pub fn predict(sem: &Semantics) -> ModelPrediction {
     let best = best.unwrap_or_else(|| ModelPrediction {
         expected: ExpectedStatic::Silent,
         rule: "no_analyzed_construct".to_string(),
-        provenance: Provenance::Quoted { source: PRECISION.to_string() },
+        provenance: Provenance::Quoted {
+            source: PRECISION.to_string(),
+        },
         documented_limitation: None,
     });
     match downgraded {
@@ -269,7 +271,9 @@ fn unreachable_site(site: &Site) -> ModelPrediction {
         SiteKind::Collective => "RC002",
     };
     measured(
-        ExpectedStatic::WarningOnly { code: code.to_string() },
+        ExpectedStatic::WarningOnly {
+            code: code.to_string(),
+        },
         "construct_unreachable_at_this_launch",
         M_UNREACHABLE,
         None,
@@ -285,7 +289,9 @@ fn quoted(
     ModelPrediction {
         expected,
         rule: rule.to_string(),
-        provenance: Provenance::Quoted { source: source.to_string() },
+        provenance: Provenance::Quoted {
+            source: source.to_string(),
+        },
         documented_limitation: limitation.map(str::to_string),
     }
 }
@@ -299,7 +305,9 @@ fn measured(
     ModelPrediction {
         expected,
         rule: rule.to_string(),
-        provenance: Provenance::Measured { evidence: evidence.to_string() },
+        provenance: Provenance::Measured {
+            evidence: evidence.to_string(),
+        },
         documented_limitation: limitation.map(str::to_string),
     }
 }
@@ -313,17 +321,23 @@ fn extrapolated(
     ModelPrediction {
         expected,
         rule: rule.to_string(),
-        provenance: Provenance::Extrapolated { basis: basis.to_string() },
+        provenance: Provenance::Extrapolated {
+            basis: basis.to_string(),
+        },
         documented_limitation: limitation.map(str::to_string),
     }
 }
 
 fn rc001() -> ExpectedStatic {
-    ExpectedStatic::Gating { code: "RC001".to_string() }
+    ExpectedStatic::Gating {
+        code: "RC001".to_string(),
+    }
 }
 
 fn rc001_warning() -> ExpectedStatic {
-    ExpectedStatic::WarningOnly { code: "RC001".to_string() }
+    ExpectedStatic::WarningOnly {
+        code: "RC001".to_string(),
+    }
 }
 
 fn predict_barrier(site: &Site) -> ModelPrediction {
@@ -331,7 +345,12 @@ fn predict_barrier(site: &Site) -> ModelPrediction {
 
     // 1. Nothing per-thread encloses it. Silence is the requirement.
     if !g.statically_divergent {
-        return quoted(ExpectedStatic::Silent, "barrier_uniform_control", PRECISION, None);
+        return quoted(
+            ExpectedStatic::Silent,
+            "barrier_uniform_control",
+            PRECISION,
+            None,
+        );
     }
 
     // 2. The barrier is behind a call. The documented rule is unconditional
@@ -390,7 +409,12 @@ fn predict_barrier(site: &Site) -> ModelPrediction {
     //    them, so this rule now follows the measurement and not the README.
     if g.trunc_cast {
         return if site.divergent {
-            measured(rc001(), "barrier_under_truncating_cast_guard", M_TRUNCATING_CAST, None)
+            measured(
+                rc001(),
+                "barrier_under_truncating_cast_guard",
+                M_TRUNCATING_CAST,
+                None,
+            )
         } else {
             extrapolated(
                 ExpectedStatic::Silent,
@@ -404,7 +428,12 @@ fn predict_barrier(site: &Site) -> ModelPrediction {
     // 7. Plain thread-index arithmetic, which the witness interpreter can
     //    replay -- so what it finds decides the tier.
     if site.divergent {
-        quoted(rc001(), "barrier_under_evaluable_divergent_guard", RC001_SURFACE, None)
+        quoted(
+            rc001(),
+            "barrier_under_evaluable_divergent_guard",
+            RC001_SURFACE,
+            None,
+        )
     } else {
         extrapolated(
             ExpectedStatic::Silent,
@@ -449,8 +478,12 @@ fn predict_collective(site: &Site) -> ModelPrediction {
         );
     }
 
-    let rc002 = ExpectedStatic::Gating { code: "RC002".to_string() };
-    let rc002_warning = ExpectedStatic::WarningOnly { code: "RC002".to_string() };
+    let rc002 = ExpectedStatic::Gating {
+        code: "RC002".to_string(),
+    };
+    let rc002_warning = ExpectedStatic::WarningOnly {
+        code: "RC002".to_string(),
+    };
 
     // Non-convergent call site. Everything that blocks RC001's promotion blocks
     // RC002's as well, in the same order.
@@ -501,7 +534,12 @@ fn predict_collective(site: &Site) -> ModelPrediction {
             None,
         )
     } else {
-        measured(rc002, "collective_naming_an_absent_lane", M_MASK_ARITHMETIC, None)
+        measured(
+            rc002,
+            "collective_naming_an_absent_lane",
+            M_MASK_ARITHMETIC,
+            None,
+        )
     }
 }
 
@@ -537,11 +575,19 @@ mod tests {
         // documentation makes the call-site rule unconditional, so it wins --
         // and the Stage 3 measurement agreed.
         let k = Kernel::with_helper(
-            vec![Stmt::If { pred: even(), body: vec![Stmt::CallHelper] }],
+            vec![Stmt::If {
+                pred: even(),
+                body: vec![Stmt::CallHelper],
+            }],
             1,
         );
         let p = predict_kernel(&k);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert_eq!(p.rule, "barrier_via_call_site");
         assert!(p.provenance.is_quoted());
         assert!(p.documented_limitation.is_some());
@@ -562,9 +608,17 @@ mod tests {
             body: vec![Stmt::Barrier],
         }]);
         let p = predict_kernel(&k);
-        assert_eq!(p.expected, ExpectedStatic::Gating { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            }
+        );
         assert!(matches!(p.provenance, Provenance::Measured { .. }));
-        assert!(p.provenance.source().contains("truncate_operand@0"), "the rule names its case");
+        assert!(
+            p.provenance.source().contains("truncate_operand@0"),
+            "the rule names its case"
+        );
     }
 
     #[test]
@@ -580,7 +634,12 @@ mod tests {
             body: vec![Stmt::Barrier],
         }]);
         let p = predict_kernel(&k);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert!(p.provenance.is_quoted());
     }
 
@@ -590,12 +649,20 @@ mod tests {
         // odd lanes and the inner one admits multiples of four.
         let k = Kernel::new(vec![Stmt::If {
             pred: Pred::Not(Box::new(even())),
-            body: vec![Stmt::If { pred: quarter_guard(), body: vec![Stmt::Barrier] }],
+            body: vec![Stmt::If {
+                pred: quarter_guard(),
+                body: vec![Stmt::Barrier],
+            }],
         }]);
         let sem = interpret(&k, Launch::one_block(32));
         assert_eq!(sem.oracle, crate::oracle::ConstructionOracle::KnownSafe);
         let p = predict(&sem);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert!(matches!(p.provenance, Provenance::Measured { .. }));
     }
 
@@ -614,11 +681,21 @@ mod tests {
     #[test]
     fn the_strongest_site_decides_a_multi_site_kernel() {
         let k = Kernel::new(vec![
-            Stmt::Ballot { mask: Mask::ActiveMask },
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
+            Stmt::Ballot {
+                mask: Mask::ActiveMask,
+            },
+            Stmt::If {
+                pred: even(),
+                body: vec![Stmt::Barrier],
+            },
         ]);
         let p = predict_kernel(&k);
-        assert_eq!(p.expected, ExpectedStatic::Gating { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            }
+        );
     }
 
     #[test]
@@ -631,12 +708,22 @@ mod tests {
         // the precision requirement survives a case built to break it.
         let k = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Ballot { mask: Mask::Literal(0x5555_5555) }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::Literal(0x5555_5555),
+            }],
         }]);
         let sem = interpret(&k, Launch::one_block(32));
-        assert_eq!(sem.oracle, crate::oracle::ConstructionOracle::KnownMaskValid);
+        assert_eq!(
+            sem.oracle,
+            crate::oracle::ConstructionOracle::KnownMaskValid
+        );
         let p = predict(&sem);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC002".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC002".into()
+            }
+        );
         assert!(matches!(p.provenance, Provenance::Measured { .. }));
     }
 
@@ -646,10 +733,17 @@ mod tests {
         // names sixteen lanes that never arrive, and that is what gates.
         let k = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::Literal(0xffff_ffff),
+            }],
         }]);
         let p = predict(&interpret(&k, Launch::one_block(32)));
-        assert_eq!(p.expected, ExpectedStatic::Gating { code: "RC002".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::Gating {
+                code: "RC002".into()
+            }
+        );
     }
 
     #[test]
@@ -660,20 +754,36 @@ mod tests {
         let uniform_bound = Value::Const(2);
         let guard_inside_loop = Kernel::new(vec![Stmt::Loop {
             bound: uniform_bound.clone(),
-            body: vec![Stmt::If { pred: even(), body: vec![Stmt::Barrier] }],
+            body: vec![Stmt::If {
+                pred: even(),
+                body: vec![Stmt::Barrier],
+            }],
         }]);
         let loop_inside_guard = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Loop { bound: uniform_bound, body: vec![Stmt::Barrier] }],
+            body: vec![Stmt::Loop {
+                bound: uniform_bound,
+                body: vec![Stmt::Barrier],
+            }],
         }]);
 
         let a = predict_kernel(&guard_inside_loop);
-        assert_eq!(a.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            a.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert_eq!(a.rule, "barrier_under_guard_inside_loop");
         assert!(matches!(a.provenance, Provenance::Measured { .. }));
 
         let b = predict_kernel(&loop_inside_guard);
-        assert_eq!(b.expected, ExpectedStatic::Gating { code: "RC001".into() });
+        assert_eq!(
+            b.expected,
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            }
+        );
 
         // Both programs are equally undefined; only the analyzer's confidence
         // in saying so differs.
@@ -686,7 +796,10 @@ mod tests {
     }
 
     fn barrier_under(pred: Pred) -> Stmt {
-        Stmt::If { pred, body: vec![Stmt::Barrier] }
+        Stmt::If {
+            pred,
+            body: vec![Stmt::Barrier],
+        }
     }
 
     #[test]
@@ -697,7 +810,12 @@ mod tests {
         // barrier below it leaves the CI gate.
         let blocked = Kernel::new(vec![barrier_under(lane_env()), barrier_under(even())]);
         let p = predict_kernel(&blocked);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert_eq!(p.rule, "outside_the_witnessed_prefix");
         assert!(matches!(p.provenance, Provenance::Measured { .. }));
 
@@ -705,7 +823,9 @@ mod tests {
         let unaffected = Kernel::new(vec![barrier_under(even()), barrier_under(lane_env())]);
         assert_eq!(
             predict_kernel(&unaffected).expected,
-            ExpectedStatic::Gating { code: "RC001".into() },
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            },
             "appending a lane-environment barrier must not un-gate the one above it"
         );
     }
@@ -716,7 +836,9 @@ mod tests {
         let one_source = Kernel::new(vec![barrier_under(even()), barrier_under(even())]);
         assert_eq!(
             predict_kernel(&one_source).expected,
-            ExpectedStatic::Gating { code: "RC001".into() }
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            }
         );
 
         // A, B, A. The third site's source is the witnessed one and it is still
@@ -729,7 +851,9 @@ mod tests {
         ]);
         assert_eq!(
             predict_kernel(&a_b_a).expected,
-            ExpectedStatic::Gating { code: "RC001".into() }
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            }
         );
         // ...and the third site individually is outside the prefix.
         let sem = interpret(&a_b_a, Launch::one_block(32));
@@ -749,18 +873,29 @@ mod tests {
         let k = Kernel::new(vec![
             Stmt::If {
                 pred: even(),
-                body: vec![Stmt::Ballot { mask: Mask::Literal(0x0000_0001) }],
+                body: vec![Stmt::Ballot {
+                    mask: Mask::Literal(0x0000_0001),
+                }],
             },
             Stmt::If {
                 pred: Pred::Not(Box::new(even())),
-                body: vec![Stmt::Ballot { mask: Mask::Literal(0x0000_0001) }],
+                body: vec![Stmt::Ballot {
+                    mask: Mask::Literal(0x0000_0001),
+                }],
             },
         ]);
         let sem = interpret(&k, Launch::one_block(32));
-        assert_eq!(sem.oracle, crate::oracle::ConstructionOracle::KnownMaskInvalid);
+        assert_eq!(
+            sem.oracle,
+            crate::oracle::ConstructionOracle::KnownMaskInvalid
+        );
         let p = predict(&sem);
-        assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC002".into() });
+        assert_eq!(
+            p.expected,
+            ExpectedStatic::WarningOnly {
+                code: "RC002".into()
+            }
+        );
         assert_eq!(p.rule, "outside_the_witnessed_prefix");
     }
-
 }

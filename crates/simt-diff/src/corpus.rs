@@ -116,9 +116,10 @@ pub fn load_dir(dir: &Path) -> Result<Vec<CorpusEntry>, String> {
         .collect();
     paths.sort();
     for path in paths {
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let entry: CorpusEntry = serde_json::from_str(&text)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let entry: CorpusEntry =
+            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         entries.push(entry);
     }
     Ok(entries)
@@ -142,7 +143,10 @@ mod tests {
             schema: schema(),
             name: "t".into(),
             finding: "test".into(),
-            template_id: format!("{seed}{}", lineage.iter().map(|l| format!("+{l}")).collect::<String>()),
+            template_id: format!(
+                "{seed}{}",
+                lineage.iter().map(|l| format!("+{l}")).collect::<String>()
+            ),
             seed_template: seed.into(),
             lineage: lineage.iter().map(|s| s.to_string()).collect(),
             launch: Launch::one_block(32),
@@ -157,7 +161,10 @@ mod tests {
 
     #[test]
     fn a_recipe_rebuilds_the_same_program_every_time() {
-        let e = entry("barrier_divergent_intra_warp", &["complementary_guard@0", "clone_guard_to_end@0.0"]);
+        let e = entry(
+            "barrier_divergent_intra_warp",
+            &["complementary_guard@0", "clone_guard_to_end@0.0"],
+        );
         let a = regenerate(&e).unwrap();
         let b = regenerate(&e).unwrap();
         assert_eq!(mutate::fingerprint(&a), mutate::fingerprint(&b));
@@ -174,10 +181,18 @@ mod tests {
     #[test]
     fn a_missing_seed_or_operator_fails_loudly_instead_of_guessing() {
         let bad_seed = entry("no_such_template", &[]);
-        assert!(regenerate(&bad_seed).unwrap_err().contains("no longer exists"));
+        assert!(
+            regenerate(&bad_seed)
+                .unwrap_err()
+                .contains("no longer exists")
+        );
 
         let bad_op = entry("barrier_uniform", &["invert_guard@0"]);
-        assert!(regenerate(&bad_op).unwrap_err().contains("no longer applies"));
+        assert!(
+            regenerate(&bad_op)
+                .unwrap_err()
+                .contains("no longer applies")
+        );
     }
 
     #[test]

@@ -1,0 +1,32 @@
+name: Bug report
+description: The tool misbehaves. For a claim in the corpus that no longer holds, use the "Finding no longer reproduces" form instead.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Smallest command sequence that shows the problem.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: analyzer
+    attributes:
+      label: Analyzer version under test
+      description: "`cargo reconverge --version`, or `n/a` if the failure needs no analyzer."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS / environment
+    validations:
+      required: false

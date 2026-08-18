@@ -25,7 +25,11 @@ pub struct Launch {
 
 impl Launch {
     pub fn one_block(block_x: u32) -> Self {
-        Launch { grid: (1, 1, 1), block: (block_x, 1, 1), shared_mem_bytes: 0 }
+        Launch {
+            grid: (1, 1, 1),
+            block: (block_x, 1, 1),
+            shared_mem_bytes: 0,
+        }
     }
 
     /// Lanes per warp is fixed at 32 on every NVIDIA target this supports.

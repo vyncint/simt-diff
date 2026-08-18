@@ -17,9 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::oracle::{ConstructionOracle, OracleStrength};
-use crate::records::{
-    AnalyzerRecord, GeneratorRecord, GpuRunRecord, RunOutcome, SanitizerRecord,
-};
+use crate::records::{AnalyzerRecord, GeneratorRecord, GpuRunRecord, RunOutcome, SanitizerRecord};
 
 /// Codes this laboratory reasons about. RC003/4/5 are syntactic or capacity
 /// checks with no interesting dynamic counterpart (baseline §6).
@@ -74,7 +72,9 @@ pub struct Evidence<'a> {
 
 impl Evidence<'_> {
     fn any_watchdog(&self) -> bool {
-        self.runs.iter().any(|r| r.outcome == RunOutcome::WatchdogFired)
+        self.runs
+            .iter()
+            .any(|r| r.outcome == RunOutcome::WatchdogFired)
     }
 
     fn all_completed(&self) -> bool {
@@ -98,7 +98,9 @@ impl Evidence<'_> {
         };
         let mut out = Vec::new();
         for run in self.runs {
-            let Some(observed) = &run.observed else { continue };
+            let Some(observed) = &run.observed else {
+                continue;
+            };
             if run.launch != model.launch {
                 continue;
             }
@@ -134,13 +136,15 @@ fn describe_lanes(lanes: &[u32]) -> String {
     if lanes.is_empty() {
         return "(none)".to_string();
     }
-    let contiguous = lanes
-        .windows(2)
-        .all(|w| w[1] == w[0] + 1);
+    let contiguous = lanes.windows(2).all(|w| w[1] == w[0] + 1);
     if contiguous && lanes.len() > 2 {
         format!("{}..={}", lanes[0], lanes[lanes.len() - 1])
     } else {
-        lanes.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+        lanes
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
@@ -197,28 +201,48 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
     // ---- rest of the evidence rather than competing with it.
     if ev.analyzer.timed_out {
         return done(
-            Classification::AnalyzerTimeout, oracle, strengths, observed,
+            Classification::AnalyzerTimeout,
+            oracle,
+            strengths,
+            observed,
             vec!["the analyzer did not finish; no static evidence exists".into()],
             vec!["nothing about the kernel's convergence properties".into()],
         );
     }
     if ev.analyzer.crashed {
         return done(
-            Classification::AnalyzerError, oracle, strengths, observed,
+            Classification::AnalyzerError,
+            oracle,
+            strengths,
+            observed,
             vec!["the analyzer exited abnormally; that is itself the finding".into()],
             vec!["nothing about the kernel's convergence properties".into()],
         );
     }
-    if ev.runs.iter().any(|r| r.outcome == RunOutcome::CompileFailed) {
+    if ev
+        .runs
+        .iter()
+        .any(|r| r.outcome == RunOutcome::CompileFailed)
+    {
         return done(
-            Classification::GpuCompileError, oracle, strengths, observed,
+            Classification::GpuCompileError,
+            oracle,
+            strengths,
+            observed,
             vec!["the case did not compile for the device".into()],
             vec!["nothing about hardware behaviour".into()],
         );
     }
-    if ev.runs.iter().any(|r| r.outcome == RunOutcome::LaunchFailed) {
+    if ev
+        .runs
+        .iter()
+        .any(|r| r.outcome == RunOutcome::LaunchFailed)
+    {
         return done(
-            Classification::GpuLaunchError, oracle, strengths, observed,
+            Classification::GpuLaunchError,
+            oracle,
+            strengths,
+            observed,
             vec!["the launch was rejected".into()],
             vec!["nothing about the kernel body".into()],
         );
@@ -226,32 +250,52 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
 
     // ---- instrumentation must not be blamed on the analyzer (brief §14).
     let raw_completed = ev.all_completed();
-    let sanitized_broke = ev
-        .sanitizer
-        .iter()
-        .any(|s| matches!(s.outcome, RunOutcome::WatchdogFired | RunOutcome::NonzeroExit));
+    let sanitized_broke = ev.sanitizer.iter().any(|s| {
+        matches!(
+            s.outcome,
+            RunOutcome::WatchdogFired | RunOutcome::NonzeroExit
+        )
+    });
     if raw_completed && sanitized_broke {
         return done(
-            Classification::InstrumentationConflict, oracle, strengths, observed,
-            vec!["the raw run completed while the sanitized run did not; the \
-                  instrumentation changed the behaviour under test".into()],
+            Classification::InstrumentationConflict,
+            oracle,
+            strengths,
+            observed,
+            vec![
+                "the raw run completed while the sanitized run did not; the \
+                  instrumentation changed the behaviour under test"
+                    .into(),
+            ],
             vec!["nothing about the analyzer".into()],
         );
     }
 
     if oracle == ConstructionOracle::NoOracle {
         return done(
-            Classification::NoOracleAvailable, oracle, strengths, observed,
-            vec!["a mutation invalidated the semantic label, so agreement is \
-                  not defined for this case".into()],
+            Classification::NoOracleAvailable,
+            oracle,
+            strengths,
+            observed,
+            vec![
+                "a mutation invalidated the semantic label, so agreement is \
+                  not defined for this case"
+                    .into(),
+            ],
             vec!["any claim about correctness in either direction".into()],
         );
     }
     if oracle == ConstructionOracle::KnownOutsideAnalyzerScope {
         return done(
-            Classification::AnalyzerUnsupported, oracle, strengths, observed,
-            vec!["the construct is outside the analyzer's documented surface, \
-                  so silence is correct behaviour".into()],
+            Classification::AnalyzerUnsupported,
+            oracle,
+            strengths,
+            observed,
+            vec![
+                "the construct is outside the analyzer's documented surface, \
+                  so silence is correct behaviour"
+                    .into(),
+            ],
             vec!["that the analyzer is wrong".into()],
         );
     }
@@ -266,38 +310,51 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
         );
         not_claimed.push("any conclusion about the analyzer".into());
         return done(
-            Classification::ConstructionOracleConflict, oracle, strengths,
-            observed, interpretation, not_claimed,
+            Classification::ConstructionOracleConflict,
+            oracle,
+            strengths,
+            observed,
+            interpretation,
+            not_claimed,
         );
     }
 
     // ---- unsafe by construction ------------------------------------------
     if oracle.asserts_invalid() {
-        let dynamic_evidence = !mismatches.is_empty() || ev.sanitizer_reported() || ev.any_watchdog();
+        let dynamic_evidence =
+            !mismatches.is_empty() || ev.sanitizer_reported() || ev.any_watchdog();
 
         if !gating.is_empty() {
             interpretation.push(
                 "the analyzer asserts the bug at a gating tier and construction \
-                 agrees".into(),
+                 agrees"
+                    .into(),
             );
             not_claimed.push(
                 "that every launch of this kernel misbehaves; undefined \
-                 behaviour need not manifest".into(),
+                 behaviour need not manifest"
+                    .into(),
             );
             let class = if dynamic_evidence {
-                interpretation.push(
-                    "independent dynamic evidence matches the prediction".into(),
-                );
+                interpretation.push("independent dynamic evidence matches the prediction".into());
                 Classification::ConfirmedStaticBugDynamicObserved
             } else {
                 interpretation.push(
                     "the hardware completed anyway, which is expected for \
                      undefined behaviour and is not counter-evidence \
-                     (baseline §9.3)".into(),
+                     (baseline §9.3)"
+                        .into(),
                 );
                 Classification::AgreementBug
             };
-            return done(class, oracle, strengths, observed, interpretation, not_claimed);
+            return done(
+                class,
+                oracle,
+                strengths,
+                observed,
+                interpretation,
+                not_claimed,
+            );
         }
 
         // No gating finding. Whether this is interesting depends on whether a
@@ -306,12 +363,17 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
             interpretation.push(
                 "the analyzer saw it but declined to promote it past warning \
                  tier; that is the documented behaviour for constructs it \
-                 cannot witness-replay, not a miss".into(),
+                 cannot witness-replay, not a miss"
+                    .into(),
             );
             not_claimed.push("that this is a false negative".into());
             return done(
-                Classification::AnalyzerUnsupported, oracle, strengths, observed,
-                interpretation, not_claimed,
+                Classification::AnalyzerUnsupported,
+                oracle,
+                strengths,
+                observed,
+                interpretation,
+                not_claimed,
             );
         }
 
@@ -324,16 +386,22 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
                 interpretation.push(
                     "the dynamic evidence is still recorded, because it says \
                      something the static gap does not: what hardware actually \
-                     does when nothing catches the bug".into(),
+                     does when nothing catches the bug"
+                        .into(),
                 );
             }
             not_claimed.push(
                 "that this is a false negative; a documented limitation is the \
-                 tool working as specified".into(),
+                 tool working as specified"
+                    .into(),
             );
             return done(
-                Classification::AnalyzerUnsupported, oracle, strengths, observed,
-                interpretation, not_claimed,
+                Classification::AnalyzerUnsupported,
+                oracle,
+                strengths,
+                observed,
+                interpretation,
+                not_claimed,
             );
         }
 
@@ -341,15 +409,21 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
             interpretation.push(
                 "construction says the program is invalid, independent dynamic \
                  evidence agrees, and the analyzer reported nothing at any \
-                 tier".into(),
+                 tier"
+                    .into(),
             );
             not_claimed.push(
                 "that the analyzer is required to catch it -- the case must be \
-                 checked against the documented surface before filing".into(),
+                 checked against the documented surface before filing"
+                    .into(),
             );
             return done(
-                Classification::PotentialFalseNegative, oracle, strengths,
-                observed, interpretation, not_claimed,
+                Classification::PotentialFalseNegative,
+                oracle,
+                strengths,
+                observed,
+                interpretation,
+                not_claimed,
             );
         }
 
@@ -357,12 +431,17 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
             "construction says invalid and the analyzer is silent, but nothing \
              independent corroborates it: no value mismatch, no sanitizer \
              report, no watchdog. On this stack that is the normal outcome for \
-             a divergent barrier (baseline §9.3/§9.4)".into(),
+             a divergent barrier (baseline §9.3/§9.4)"
+                .into(),
         );
         not_claimed.push("a false negative; there is no second source".into());
         return done(
-            Classification::DynamicInconclusive, oracle, strengths, observed,
-            interpretation, not_claimed,
+            Classification::DynamicInconclusive,
+            oracle,
+            strengths,
+            observed,
+            interpretation,
+            not_claimed,
         );
     }
 
@@ -370,31 +449,43 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
     if !gating.is_empty() {
         interpretation.push(
             "the analyzer asserts a bug at a gating tier in a kernel that is \
-             safe by construction".into(),
+             safe by construction"
+                .into(),
         );
         if ev.all_completed() && mismatches.is_empty() {
             interpretation.push(
                 "every generated launch completed with values matching the \
-                 reference model".into(),
+                 reference model"
+                    .into(),
             );
         }
         not_claimed.push(
             "that the kernel is safe for every launch; only the generated \
-             finite domain was run".into(),
+             finite domain was run"
+                .into(),
         );
         return done(
-            Classification::PotentialFalsePositive, oracle, strengths, observed,
-            interpretation, not_claimed,
+            Classification::PotentialFalsePositive,
+            oracle,
+            strengths,
+            observed,
+            interpretation,
+            not_claimed,
         );
     }
     if !warnings.is_empty() {
         interpretation.push(
             "warning-tier findings on a safe kernel are not assertions and do \
-             not gate; this is within specification".into(),
+             not gate; this is within specification"
+                .into(),
         );
         return done(
-            Classification::AgreementSafe, oracle, strengths, observed,
-            interpretation, not_claimed,
+            Classification::AgreementSafe,
+            oracle,
+            strengths,
+            observed,
+            interpretation,
+            not_claimed,
         );
     }
     // A static-only sweep can still settle this branch: construction says the
@@ -415,17 +506,23 @@ pub fn classify(ev: &Evidence<'_>) -> DifferentialResult {
                 .into(),
         );
         return done(
-            Classification::AgreementSafe, oracle, strengths, observed,
-            interpretation, not_claimed,
+            Classification::AgreementSafe,
+            oracle,
+            strengths,
+            observed,
+            interpretation,
+            not_claimed,
         );
     }
-    interpretation.push(
-        "construction, the analyzer, and every generated launch agree".into(),
-    );
+    interpretation.push("construction, the analyzer, and every generated launch agree".into());
     not_claimed.push("safety for launches outside the generated domain".into());
     done(
-        Classification::AgreementSafe, oracle, strengths, observed,
-        interpretation, not_claimed,
+        Classification::AgreementSafe,
+        oracle,
+        strengths,
+        observed,
+        interpretation,
+        not_claimed,
     )
 }
 

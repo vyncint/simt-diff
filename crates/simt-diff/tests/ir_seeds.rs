@@ -50,8 +50,16 @@ fn each_seed_renders_the_same_program_as_its_hand_written_template() {
             "{name}: the IR renders a different body than the template that was \
              measured, so the seed is not the program Stage 3 ran"
         );
-        assert_eq!(kernel.extra_items(), hand.extra_items, "{name}: items differ");
-        assert_eq!(kernel.extra_uses(), hand.extra_uses.to_vec(), "{name}: uses differ");
+        assert_eq!(
+            kernel.extra_items(),
+            hand.extra_items,
+            "{name}: items differ"
+        );
+        assert_eq!(
+            kernel.extra_uses(),
+            hand.extra_uses.to_vec(),
+            "{name}: uses differ"
+        );
     }
 }
 
@@ -108,7 +116,8 @@ fn the_reference_models_agree_wherever_both_exist() {
                 // Only the launch-dependent seed may differ here, for the same
                 // reason its oracle does.
                 assert_eq!(
-                    name, "barrier_guarded_by_warp_id",
+                    name,
+                    "barrier_guarded_by_warp_id",
                     "{name}: one side has a reference model and the other does \
                      not (computed: {}, declared: {})",
                     c.is_some(),
@@ -138,10 +147,16 @@ fn warp_id_is_the_one_seed_whose_oracle_is_launch_dependent() {
 
     let at_32 = interpret(&kernel, Launch::one_block(32));
     assert_eq!(at_32.oracle, ConstructionOracle::KnownSafe);
-    assert!(at_32.reference.is_some(), "a safe kernel has defined output");
+    assert!(
+        at_32.reference.is_some(),
+        "a safe kernel has defined output"
+    );
 
     let at_64 = interpret(&kernel, Launch::one_block(64));
-    assert_eq!(at_64.oracle, hand.oracle, "the template's label holds from two warps up");
+    assert_eq!(
+        at_64.oracle, hand.oracle,
+        "the template's label holds from two warps up"
+    );
 
     // The prediction is the same either way, which is why the Stage 3 row held.
     let expected: ExpectedStatic = hand.expected_static.into();
@@ -180,7 +195,10 @@ fn the_seeds_reproduce_the_measured_conformance_table() {
             ExpectedStatic::Silent => "silent".to_string(),
             ExpectedStatic::Unspecified => "-".to_string(),
         };
-        assert_eq!(&rendered, row, "{name}: the model no longer predicts the measured row");
+        assert_eq!(
+            &rendered, row,
+            "{name}: the model no longer predicts the measured row"
+        );
     }
 }
 
@@ -202,7 +220,10 @@ fn the_engine_reaches_cases_the_hand_written_corpus_never_had() {
         // valid by construction at a call site that cannot be proven convergent
         "collective_under_divergence+mask_match_participants@0.0",
     ] {
-        assert!(ids.contains(&wanted.to_string()), "the engine never generates {wanted}");
+        assert!(
+            ids.contains(&wanted.to_string()),
+            "the engine never generates {wanted}"
+        );
     }
 
     // Coverage is asserted over programs, not lineages: two operator chains that
@@ -218,7 +239,8 @@ fn the_engine_reaches_cases_the_hand_written_corpus_never_had() {
         "0x5555_5555",
     ] {
         assert!(
-            all.iter().any(|m| m.kernel.render_body().contains(construct)),
+            all.iter()
+                .any(|m| m.kernel.render_body().contains(construct)),
             "no generated kernel contains `{construct}`"
         );
     }

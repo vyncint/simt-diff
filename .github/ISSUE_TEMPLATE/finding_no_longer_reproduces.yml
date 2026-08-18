@@ -1,0 +1,48 @@
+name: Finding no longer reproduces
+description: A regression-corpus entry stopped being true. This is the highest-value report here — an entry that has quietly expired is worse than no entry.
+labels: ["corpus-drift"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two very different things can produce this, and the report is much more
+        useful if it says which:
+
+        - **ANALYZER DRIFT** — the same program, a different answer. News about
+          reconverge, and the reason the entry exists.
+        - **GENERATOR DRIFT** — the recipe now builds a different program. News
+          about this repository.
+
+        `simt-diff regress` distinguishes them for you.
+  - type: input
+    id: entry
+    attributes:
+      label: Corpus entry
+      description: "The file in `corpus/`, e.g. `ci-gate-lost-to-a-barrier-above`."
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Which drift?
+      options:
+        - ANALYZER DRIFT (same program, different answer)
+        - GENERATOR DRIFT (recipe builds something else)
+        - BROKEN (the recipe no longer rebuilds at all)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: "`simt-diff regress` output"
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: analyzer
+    attributes:
+      label: Analyzer version
+      description: The entry records the version it was measured against; this is the one you ran.
+    validations:
+      required: true

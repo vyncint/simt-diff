@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a capability. Proposals that would let the laboratory be wrong in a new way are the most welcome kind.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What question can't be answered today?
+      description: Describe the claim you cannot currently make, check, or refute.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: falsifiable
+    attributes:
+      label: How would it be shown to be wrong?
+      description: What measurement or case would refute it? A capability nothing can refute is documentation, not evidence.
+    validations:
+      required: false

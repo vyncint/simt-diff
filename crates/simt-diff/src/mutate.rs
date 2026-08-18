@@ -58,18 +58,34 @@ fn quarter() -> Pred {
 /// verdict on kernels nobody has measured.
 pub fn seeds() -> Vec<(&'static str, Kernel)> {
     vec![
-        ("mask_full_convergent", Kernel::new(vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }])),
-        ("mask_shrunk_convergent", Kernel::new(vec![Stmt::Ballot { mask: Mask::Literal(0x0000_ffff) }])),
+        (
+            "mask_full_convergent",
+            Kernel::new(vec![Stmt::Ballot {
+                mask: Mask::Literal(0xffff_ffff),
+            }]),
+        ),
+        (
+            "mask_shrunk_convergent",
+            Kernel::new(vec![Stmt::Ballot {
+                mask: Mask::Literal(0x0000_ffff),
+            }]),
+        ),
         ("barrier_uniform", Kernel::new(vec![Stmt::Barrier])),
         (
             "barrier_divergent_intra_warp",
-            Kernel::new(vec![Stmt::If { pred: even(), body: vec![Stmt::Barrier] }]),
+            Kernel::new(vec![Stmt::If {
+                pred: even(),
+                body: vec![Stmt::Barrier],
+            }]),
         ),
         (
             "barrier_divergent_nested",
             Kernel::new(vec![Stmt::If {
                 pred: even(),
-                body: vec![Stmt::If { pred: quarter(), body: vec![Stmt::Barrier] }],
+                body: vec![Stmt::If {
+                    pred: quarter(),
+                    body: vec![Stmt::Barrier],
+                }],
             }]),
         ),
         (
@@ -81,9 +97,18 @@ pub fn seeds() -> Vec<(&'static str, Kernel)> {
         ),
         (
             "barrier_in_helper_divergent_call",
-            Kernel::with_helper(vec![Stmt::If { pred: even(), body: vec![Stmt::CallHelper] }], 1),
+            Kernel::with_helper(
+                vec![Stmt::If {
+                    pred: even(),
+                    body: vec![Stmt::CallHelper],
+                }],
+                1,
+            ),
         ),
-        ("barrier_in_helper_uniform_call", Kernel::with_helper(vec![Stmt::CallHelper], 1)),
+        (
+            "barrier_in_helper_uniform_call",
+            Kernel::with_helper(vec![Stmt::CallHelper], 1),
+        ),
         (
             "barrier_guarded_by_lanemask",
             Kernel::new(vec![Stmt::If {
@@ -102,26 +127,40 @@ pub fn seeds() -> Vec<(&'static str, Kernel)> {
             "collective_under_divergence",
             Kernel::new(vec![Stmt::If {
                 pred: even(),
-                body: vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }],
+                body: vec![Stmt::Ballot {
+                    mask: Mask::Literal(0xffff_ffff),
+                }],
             }]),
         ),
         (
             "mask_from_named_const",
-            Kernel::new(vec![Stmt::Ballot { mask: Mask::NamedConst(0xffff_ffff) }]),
+            Kernel::new(vec![Stmt::Ballot {
+                mask: Mask::NamedConst(0xffff_ffff),
+            }]),
         ),
-        ("mask_from_active_mask", Kernel::new(vec![Stmt::Ballot { mask: Mask::ActiveMask }])),
+        (
+            "mask_from_active_mask",
+            Kernel::new(vec![Stmt::Ballot {
+                mask: Mask::ActiveMask,
+            }]),
+        ),
         (
             "collective_unmasked_wrapper",
             Kernel::new(vec![Stmt::If {
                 pred: even(),
-                body: vec![Stmt::Ballot { mask: Mask::ImplicitWrapper }],
+                body: vec![Stmt::Ballot {
+                    mask: Mask::ImplicitWrapper,
+                }],
             }]),
         ),
     ]
 }
 
 pub fn seed(name: &str) -> Option<Kernel> {
-    seeds().into_iter().find(|(n, _)| *n == name).map(|(_, k)| k)
+    seeds()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, k)| k)
 }
 
 // --------------------------------------------------------------- operators ---
@@ -142,9 +181,7 @@ fn map_first_value(p: &mut Pred, f: &mut dyn FnMut(&mut Value) -> bool) -> bool 
 /// and changes only whether the analyzer can evaluate its source.
 fn replace_leaf(v: &mut Value, leaf: Value) {
     match v {
-        Value::LaneIndex | Value::WarpId | Value::LaneMaskLtPopcount | Value::Const(_) => {
-            *v = leaf
-        }
+        Value::LaneIndex | Value::WarpId | Value::LaneMaskLtPopcount | Value::Const(_) => *v = leaf,
         Value::Rem(inner, _)
         | Value::Div(inner, _)
         | Value::BitAnd(inner, _)
@@ -189,8 +226,11 @@ fn double_modulus(v: &mut Value) -> bool {
 pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
     let sem = interpret(kernel, launch);
     let mut out: Vec<(String, Kernel)> = Vec::new();
-    let sites: Vec<(Vec<usize>, Stmt)> =
-        kernel.walk().into_iter().map(|(p, s)| (p, s.clone())).collect();
+    let sites: Vec<(Vec<usize>, Stmt)> = kernel
+        .walk()
+        .into_iter()
+        .map(|(p, s)| (p, s.clone()))
+        .collect();
 
     let mut push = |name: String, k: Kernel| {
         if &k != kernel {
@@ -199,7 +239,11 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
     };
 
     for (path, stmt) in &sites {
-        let tag = path.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
+        let tag = path
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
 
         // ---- guard rewrites -------------------------------------------------
         if let Stmt::If { pred, body } = stmt {
@@ -238,7 +282,10 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
             if let Some((vec, idx)) = paired.locate_mut(path) {
                 vec.insert(
                     idx + 1,
-                    Stmt::If { pred: Pred::Not(Box::new(pred.clone())), body: body.clone() },
+                    Stmt::If {
+                        pred: Pred::Not(Box::new(pred.clone())),
+                        body: body.clone(),
+                    },
                 );
             }
             push(format!("complementary_guard@{tag}"), paired);
@@ -286,7 +333,10 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
             if let Some((vec, idx)) = k.locate_mut(path) {
                 let old = vec[idx].clone();
                 vec[idx] = match wrapper {
-                    Wrapper::Guard => Stmt::If { pred: quarter(), body: vec![old] },
+                    Wrapper::Guard => Stmt::If {
+                        pred: quarter(),
+                        body: vec![old],
+                    },
                     Wrapper::Loop => Stmt::Loop {
                         bound: Value::Rem(Box::new(Value::LaneIndex), 4),
                         body: vec![old],
@@ -303,8 +353,10 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
         // barrier *below* it does not. The original guard is untouched in both,
         // so any change in the verdict can only come from the addition.
         if matches!(stmt, Stmt::Barrier | Stmt::CallHelper) && path.len() > 1 {
-            for (op, after) in [("add_lane_env_sibling", true), ("prepend_lane_env_sibling", false)]
-            {
+            for (op, after) in [
+                ("add_lane_env_sibling", true),
+                ("prepend_lane_env_sibling", false),
+            ] {
                 let mut k = kernel.clone();
                 let outer = &path[..path.len() - 1];
                 if let Some((vec, idx)) = k.locate_mut(outer) {
@@ -358,7 +410,10 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
                 ("mask_widen".to_string(), Mask::Literal(0xffff_ffff)),
                 ("mask_shrink".to_string(), Mask::Literal(0x0000_ffff)),
                 ("mask_single_lane".to_string(), Mask::Literal(0x0000_0001)),
-                ("mask_to_named_const".to_string(), Mask::NamedConst(0xffff_ffff)),
+                (
+                    "mask_to_named_const".to_string(),
+                    Mask::NamedConst(0xffff_ffff),
+                ),
                 ("mask_to_active_mask".to_string(), Mask::ActiveMask),
                 ("mask_to_wrapper".to_string(), Mask::ImplicitWrapper),
             ];
@@ -448,7 +503,10 @@ fn guard_rewrites() -> Vec<GuardRewrite> {
         ),
     ];
     for (name, f) in value_rewrites() {
-        v.push((name, Box::new(move |p: &mut Pred| map_first_value(p, &mut |val| f(val)))));
+        v.push((
+            name,
+            Box::new(move |p: &mut Pred| map_first_value(p, &mut |val| f(val))),
+        ));
     }
     v
 }
@@ -458,7 +516,10 @@ type ValueRewrite = (&'static str, std::rc::Rc<dyn Fn(&mut Value) -> bool>);
 fn value_rewrites() -> Vec<ValueRewrite> {
     use std::rc::Rc;
     vec![
-        ("retarget_modulus", Rc::new(double_modulus) as Rc<dyn Fn(&mut Value) -> bool>),
+        (
+            "retarget_modulus",
+            Rc::new(double_modulus) as Rc<dyn Fn(&mut Value) -> bool>,
+        ),
         ("truncate_operand", Rc::new(wrap_leaf_in_cast)),
         (
             "to_warp_id",
@@ -679,11 +740,7 @@ fn kernel_source(
          //!\n\
          //! The prediction for this case, and what it rests on, are in \
          generator.json.",
-        sem.oracle,
-        launch.block.0,
-        sem.oracle_reason,
-        lineage,
-        m.seed,
+        sem.oracle, launch.block.0, sem.oracle_reason, lineage, m.seed,
     );
     let _ = prediction;
     render_kernel_file(
@@ -694,7 +751,6 @@ fn kernel_source(
         launch,
     )
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -707,7 +763,12 @@ mod tests {
     fn find_mutant(all: &[Mutant], id: &str) -> Mutant {
         all.iter()
             .find(|m| m.id == id)
-            .unwrap_or_else(|| panic!("no mutant `{id}`; have {:?}", all.iter().map(|m| &m.id).collect::<Vec<_>>()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no mutant `{id}`; have {:?}",
+                    all.iter().map(|m| &m.id).collect::<Vec<_>>()
+                )
+            })
             .clone()
     }
 
@@ -743,7 +804,9 @@ mod tests {
         // ...but the analyzer documents that it cannot evaluate the source.
         assert_eq!(
             predict(&sem).expected,
-            ExpectedStatic::WarningOnly { code: "RC001".into() }
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
         );
     }
 
@@ -761,14 +824,19 @@ mod tests {
         // model::tests and docs/stage-4.md.
         assert_eq!(
             predict(&sem).expected,
-            ExpectedStatic::WarningOnly { code: "RC002".into() }
+            ExpectedStatic::WarningOnly {
+                code: "RC002".into()
+            }
         );
     }
 
     #[test]
     fn a_truncating_cast_mutation_renders_the_cast() {
         let all = mutations(&seed("barrier_divergent_intra_warp").unwrap(), L());
-        let (_, k) = all.iter().find(|(op, _)| op == "truncate_operand@0").unwrap();
+        let (_, k) = all
+            .iter()
+            .find(|(op, _)| op == "truncate_operand@0")
+            .unwrap();
         assert!(k.render_body().contains("(i.get() as u8) as u32 % 2 == 0"));
     }
 
@@ -781,8 +849,16 @@ mod tests {
             b.iter().map(|m| m.id.clone()).collect::<Vec<_>>()
         );
         let prints: BTreeSet<String> = a.iter().map(|m| fingerprint(&m.kernel)).collect();
-        assert_eq!(prints.len(), a.len(), "no two cases render the same program");
-        assert!(a.len() > seeds().len() * 3, "depth 1 should be a real space, got {}", a.len());
+        assert_eq!(
+            prints.len(),
+            a.len(),
+            "no two cases render the same program"
+        );
+        assert!(
+            a.len() > seeds().len() * 3,
+            "depth 1 should be a real space, got {}",
+            a.len()
+        );
     }
 
     #[test]
@@ -813,23 +889,43 @@ mod tests {
         let basis = r.prediction_basis.unwrap();
         assert_eq!(basis.seed_template, "barrier_divergent_intra_warp");
         assert_eq!(basis.mutation_lineage, vec!["to_lanemask@0"]);
-        assert!(r.kernel_source.contains("MUTATION: to_lanemask@0 of barrier_divergent_intra_warp"));
-            assert!(
+        assert!(
+            r.kernel_source
+                .contains("MUTATION: to_lanemask@0 of barrier_divergent_intra_warp")
+        );
+        assert!(
             !r.kernel_source.contains("RC001"),
             "the analyzed source must not carry the prediction: a rule change \
              would rename every case in the corpus"
         );
-        assert_eq!(r.expected_static, crate::prediction::ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(
+            r.expected_static,
+            crate::prediction::ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            }
+        );
         assert!(r.documented_limitation.is_some());
     }
 
     #[test]
     fn the_sibling_operators_differ_only_in_order_and_the_order_is_the_finding() {
         let all = mutations(&seed("barrier_divergent_intra_warp").unwrap(), L());
-        let below = all.iter().find(|(op, _)| op == "add_lane_env_sibling@0.0").unwrap().1.clone();
-        let above =
-            all.iter().find(|(op, _)| op == "prepend_lane_env_sibling@0.0").unwrap().1.clone();
-        assert_ne!(below, above, "the two operators must produce different programs");
+        let below = all
+            .iter()
+            .find(|(op, _)| op == "add_lane_env_sibling@0.0")
+            .unwrap()
+            .1
+            .clone();
+        let above = all
+            .iter()
+            .find(|(op, _)| op == "prepend_lane_env_sibling@0.0")
+            .unwrap()
+            .1
+            .clone();
+        assert_ne!(
+            below, above,
+            "the two operators must produce different programs"
+        );
         for k in [&below, &above] {
             assert!(k.render_body().contains("if i.get() % 2 == 0 {"));
             assert!(k.render_body().contains("if warp::warp_id() == 0 {"));
@@ -837,11 +933,15 @@ mod tests {
         }
         assert_eq!(
             predict(&interpret(&below, L())).expected,
-            ExpectedStatic::Gating { code: "RC001".into() },
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            },
         );
         assert_eq!(
             predict(&interpret(&above, L())).expected,
-            ExpectedStatic::WarningOnly { code: "RC001".into() },
+            ExpectedStatic::WarningOnly {
+                code: "RC001".into()
+            },
             "the same barrier, moved above the confirmable one, un-gates it"
         );
     }
@@ -856,7 +956,10 @@ mod tests {
             .find(|(op, _)| op == "add_lane_env_sibling@0.0")
             .expect("a barrier inside a guard can get a sibling");
         let body = k.render_body();
-        assert!(body.contains("if i.get() % 2 == 0 {"), "the original guard survives verbatim");
+        assert!(
+            body.contains("if i.get() % 2 == 0 {"),
+            "the original guard survives verbatim"
+        );
         assert!(body.contains("if warp::warp_id() == 0 {"));
         let sem = interpret(k, L());
         assert_eq!(sem.oracle, ConstructionOracle::KnownUnsafe);
@@ -866,7 +969,9 @@ mod tests {
         // is about program order and not about the function as a whole.
         assert_eq!(
             predict(&sem).expected,
-            ExpectedStatic::Gating { code: "RC001".into() },
+            ExpectedStatic::Gating {
+                code: "RC001".into()
+            },
             "a lane-environment barrier *after* a confirmable one leaves it gated"
         );
     }
@@ -900,6 +1005,9 @@ mod tests {
                 "if i.get() % 2 == 0 {",
             ]
         );
-        assert_eq!(interpret(&a_b_a, L()).oracle, ConstructionOracle::KnownUnsafe);
+        assert_eq!(
+            interpret(&a_b_a, L()).oracle,
+            ConstructionOracle::KnownUnsafe
+        );
     }
 }

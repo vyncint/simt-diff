@@ -113,6 +113,9 @@ mod tests {
     fn a_missing_summary_is_unknown_not_clean() {
         let (reported, count) = parse_sanitizer("sanitizer failed to start");
         assert!(!reported);
-        assert_eq!(count, None, "absence of a summary must not read as zero errors");
+        assert_eq!(
+            count, None,
+            "absence of a summary must not read as zero errors"
+        );
     }
 }

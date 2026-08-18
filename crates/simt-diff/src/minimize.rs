@@ -27,7 +27,10 @@ pub enum Property {
     /// The construction oracle and the analyzer's signature both stay as they
     /// were. This is the default, and the only one that is safe without thinking
     /// about the case first.
-    OracleAndSignature { oracle: ConstructionOracle, signature: String },
+    OracleAndSignature {
+        oracle: ConstructionOracle,
+        signature: String,
+    },
     /// Only the analyzer's signature is pinned. Useful when the point of the
     /// case is what the analyzer says and not what the kernel means -- but it
     /// will happily reduce a bug into a different kernel that reads the same.
@@ -137,8 +140,13 @@ impl Minimizer<'_> {
         let dir = self.workdir.join(format!("candidate-{n:03}"));
         let record = crate::mutate::record_for_kernel(kernel, "candidate", self.launch);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        crate::emit::emit(&dir, &record, &crate::emit::DeviceDep::default(), &self.device_dep)
-            .map_err(|e| e.to_string())?;
+        crate::emit::emit(
+            &dir,
+            &record,
+            &crate::emit::DeviceDep::default(),
+            &self.device_dep,
+        )
+        .map_err(|e| e.to_string())?;
         self.analyzer
             .analyze(&dir.join("kernel"))
             .map_err(|e| format!("analyzing {}: {e}", dir.display()))
@@ -188,8 +196,11 @@ fn value_size(v: &Value) -> usize {
 /// finding needs than dropping a `!`.
 pub fn reductions(kernel: &Kernel) -> Vec<(String, Kernel)> {
     let mut out: Vec<(String, Kernel)> = Vec::new();
-    let sites: Vec<(Vec<usize>, Stmt)> =
-        kernel.walk().into_iter().map(|(p, s)| (p, s.clone())).collect();
+    let sites: Vec<(Vec<usize>, Stmt)> = kernel
+        .walk()
+        .into_iter()
+        .map(|(p, s)| (p, s.clone()))
+        .collect();
 
     let mut push = |name: String, k: Kernel| {
         if size(&k) < size(kernel) {
@@ -199,7 +210,11 @@ pub fn reductions(kernel: &Kernel) -> Vec<(String, Kernel)> {
 
     // Whole statements first.
     for (path, _) in &sites {
-        let tag = path.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
+        let tag = path
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
         let mut k = kernel.clone();
         if let Some((vec, idx)) = k.locate_mut(path) {
             vec.remove(idx);
@@ -209,7 +224,11 @@ pub fn reductions(kernel: &Kernel) -> Vec<(String, Kernel)> {
 
     // Then the wrappers, keeping what they contained.
     for (path, stmt) in &sites {
-        let tag = path.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
+        let tag = path
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
         let body = match stmt {
             Stmt::If { body, .. } | Stmt::Loop { body, .. } => body.clone(),
             _ => continue,
@@ -221,13 +240,21 @@ pub fn reductions(kernel: &Kernel) -> Vec<(String, Kernel)> {
                 vec.insert(idx + j, s);
             }
         }
-        let what = if matches!(stmt, Stmt::If { .. }) { "unwrap_guard" } else { "unwrap_loop" };
+        let what = if matches!(stmt, Stmt::If { .. }) {
+            "unwrap_guard"
+        } else {
+            "unwrap_loop"
+        };
         push(format!("{what}@{tag}"), k);
     }
 
     // Then the conditions inside them.
     for (path, stmt) in &sites {
-        let tag = path.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
+        let tag = path
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
         if let Stmt::If { pred, .. } = stmt {
             for (name, simpler) in simplify_pred(pred) {
                 let mut k = kernel.clone();
@@ -363,7 +390,12 @@ mod tests {
                     pred: Pred::And(Box::new(even()), Box::new(even())),
                     body: vec![Stmt::Loop {
                         bound: Value::Rem(Box::new(Value::TruncU8(Box::new(Value::LaneIndex))), 4),
-                        body: vec![Stmt::CallHelper, Stmt::Ballot { mask: Mask::ActiveMask }],
+                        body: vec![
+                            Stmt::CallHelper,
+                            Stmt::Ballot {
+                                mask: Mask::ActiveMask,
+                            },
+                        ],
                     }],
                 },
                 Stmt::Barrier,
@@ -387,7 +419,10 @@ mod tests {
     fn a_minimal_case_offers_no_reduction_that_keeps_it_meaningful() {
         // One guarded barrier: deleting either part is possible, but there is
         // nothing left to unwrap or simplify beyond the modulus.
-        let k = Kernel::new(vec![Stmt::If { pred: even(), body: vec![Stmt::Barrier] }]);
+        let k = Kernel::new(vec![Stmt::If {
+            pred: even(),
+            body: vec![Stmt::Barrier],
+        }]);
         let names: Vec<String> = reductions(&k).into_iter().map(|(n, _)| n).collect();
         assert!(names.contains(&"delete@0".to_string()));
         assert!(names.contains(&"unwrap_guard@0".to_string()));
@@ -399,7 +434,10 @@ mod tests {
         // Otherwise the reduced kernel would call a function that no longer
         // exists, and every candidate after it would fail to compile.
         let k = Kernel::with_helper(
-            vec![Stmt::If { pred: even(), body: vec![Stmt::CallHelper] }],
+            vec![Stmt::If {
+                pred: even(),
+                body: vec![Stmt::CallHelper],
+            }],
             1,
         );
         let (_, reduced) = reductions(&k)
@@ -417,7 +455,10 @@ mod tests {
         // A reduction that turns an unsafe kernel safe would preserve
         // "RC001/warning" while destroying the finding, so the oracle is part of
         // what must not move.
-        let unsafe_k = Kernel::new(vec![Stmt::If { pred: even(), body: vec![Stmt::Barrier] }]);
+        let unsafe_k = Kernel::new(vec![Stmt::If {
+            pred: even(),
+            body: vec![Stmt::Barrier],
+        }]);
         let safe_k = Kernel::new(vec![Stmt::Barrier]);
         let sem_unsafe = interpret(&unsafe_k, Launch::one_block(32));
         let sem_safe = interpret(&safe_k, Launch::one_block(32));
@@ -448,7 +489,10 @@ mod tests {
             "the same analyzer answer on a now-safe kernel is not the same finding"
         );
         assert!(
-            Property::Signature { signature: analysis.signature() }.holds(&sem_safe, &analysis),
+            Property::Signature {
+                signature: analysis.signature()
+            }
+            .holds(&sem_safe, &analysis),
             "the signature-only property deliberately does not care"
         );
     }

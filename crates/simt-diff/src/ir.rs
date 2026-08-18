@@ -55,10 +55,18 @@ impl Value {
             Value::LaneMaskLtPopcount => tid % 32,
             Value::Const(v) => *v,
             Value::Rem(v, k) => {
-                if *k == 0 { 0 } else { v.eval(tid) % k }
+                if *k == 0 {
+                    0
+                } else {
+                    v.eval(tid) % k
+                }
             }
             Value::Div(v, k) => {
-                if *k == 0 { 0 } else { v.eval(tid) / k }
+                if *k == 0 {
+                    0
+                } else {
+                    v.eval(tid) / k
+                }
             }
             Value::BitAnd(v, k) => v.eval(tid) & k,
             Value::TruncU8(v) => v.eval(tid) & 0xff,
@@ -251,10 +259,18 @@ pub enum Stmt {
     /// `thread::sync_threads()`
     Barrier,
     /// `b = warp::ballot_sync(<mask>, true)`
-    Ballot { mask: Mask },
-    If { pred: Pred, body: Vec<Stmt> },
+    Ballot {
+        mask: Mask,
+    },
+    If {
+        pred: Pred,
+        body: Vec<Stmt>,
+    },
     /// `while <counter> < (<bound>) { body; <counter> += 1 }`
-    Loop { bound: Value, body: Vec<Stmt> },
+    Loop {
+        bound: Value,
+        body: Vec<Stmt>,
+    },
     /// `barrier_helper()` -- the barrier is one call away.
     CallHelper,
 }
@@ -281,11 +297,17 @@ pub enum WriteExpr {
 
 impl Kernel {
     pub fn new(stmts: Vec<Stmt>) -> Self {
-        Kernel { stmts, helper_depth: 0 }
+        Kernel {
+            stmts,
+            helper_depth: 0,
+        }
     }
 
     pub fn with_helper(stmts: Vec<Stmt>, helper_depth: usize) -> Self {
-        Kernel { stmts, helper_depth }
+        Kernel {
+            stmts,
+            helper_depth,
+        }
     }
 
     pub fn write_expr(&self) -> WriteExpr {
@@ -374,7 +396,11 @@ impl Kernel {
     }
 
     pub fn extra_uses(&self) -> Vec<&'static str> {
-        if self.uses_warp_api() { vec!["warp"] } else { vec![] }
+        if self.uses_warp_api() {
+            vec!["warp"]
+        } else {
+            vec![]
+        }
     }
 
     /// Named-mask consts and helper functions, emitted before the kernel and
@@ -382,7 +408,10 @@ impl Kernel {
     pub fn extra_items(&self) -> String {
         let mut items = String::new();
         for (_, s) in self.walk() {
-            if let Stmt::Ballot { mask: Mask::NamedConst(v) } = s {
+            if let Stmt::Ballot {
+                mask: Mask::NamedConst(v),
+            } = s
+            {
                 let decl = format!("pub const {}: u32 = {};\n", const_name(*v), hex32(*v));
                 if !items.contains(&decl) {
                     items.push_str(&decl);
@@ -428,7 +457,11 @@ impl Kernel {
             lines.push("let mut b = 0u32;".to_string());
         }
 
-        let mut state = RenderState { counters, next_counter: 0, inline_ballot };
+        let mut state = RenderState {
+            counters,
+            next_counter: 0,
+            inline_ballot,
+        };
         render_stmts(&self.stmts, 0, &mut state, &mut lines);
 
         let write = match self.write_expr() {
@@ -440,7 +473,9 @@ impl Kernel {
                 .cloned()
                 .unwrap_or_else(|| "1".to_string()),
         };
-        lines.push(format!("if let Some(e) = out.get_mut(i) {{ *e = {write}; }}"));
+        lines.push(format!(
+            "if let Some(e) = out.get_mut(i) {{ *e = {write}; }}"
+        ));
 
         lines
             .iter()
@@ -460,7 +495,13 @@ impl Kernel {
     pub fn loop_counters(&self) -> Vec<String> {
         let n = self.count(&|s| matches!(s, Stmt::Loop { .. }));
         (0..n)
-            .map(|i| if i == 0 { "n".to_string() } else { format!("n{i}") })
+            .map(|i| {
+                if i == 0 {
+                    "n".to_string()
+                } else {
+                    format!("n{i}")
+                }
+            })
             .collect()
     }
 }
@@ -511,7 +552,10 @@ fn render_stmts(stmts: &[Stmt], depth: usize, state: &mut RenderState, out: &mut
                 if depth > 0 {
                     out.push(format!("{pad}{name} = 0;"));
                 }
-                out.push(format!("{pad}while {name} < ({}) {{", bound.render(Ctx::U32)));
+                out.push(format!(
+                    "{pad}while {name} < ({}) {{",
+                    bound.render(Ctx::U32)
+                ));
                 render_stmts(body, depth + 1, state, out);
                 out.push(format!("{}{name} += 1;", "    ".repeat(depth + 1)));
                 out.push(format!("{pad}}}"));
@@ -527,7 +571,11 @@ pub fn hex32(v: u32) -> String {
 }
 
 fn const_name(v: u32) -> &'static str {
-    if v == 0xffff_ffff { "FULL_MASK" } else { "PARTIAL_MASK" }
+    if v == 0xffff_ffff {
+        "FULL_MASK"
+    } else {
+        "PARTIAL_MASK"
+    }
 }
 
 #[cfg(test)]
@@ -559,7 +607,14 @@ mod tests {
 
     #[test]
     fn negation_is_exact_and_involutive() {
-        for op in [CmpOp::Eq, CmpOp::Ne, CmpOp::Lt, CmpOp::Le, CmpOp::Gt, CmpOp::Ge] {
+        for op in [
+            CmpOp::Eq,
+            CmpOp::Ne,
+            CmpOp::Lt,
+            CmpOp::Le,
+            CmpOp::Gt,
+            CmpOp::Ge,
+        ] {
             assert_eq!(op.negate().negate(), op);
             for a in 0..8u32 {
                 for b in 0..8u32 {
@@ -574,7 +629,10 @@ mod tests {
         // The hand-written template in templates.rs is the reference: if the
         // renderer cannot reproduce it exactly, the IR is not describing the
         // same programs the measured conformance rows came from.
-        let k = Kernel::new(vec![Stmt::If { pred: even_guard(), body: vec![Stmt::Barrier] }]);
+        let k = Kernel::new(vec![Stmt::If {
+            pred: even_guard(),
+            body: vec![Stmt::Barrier],
+        }]);
         assert_eq!(
             k.render_body(),
             "        let i = thread::index_1d();\n\
@@ -605,12 +663,20 @@ mod tests {
 
     #[test]
     fn a_single_top_level_ballot_is_a_let_binding_and_a_guarded_one_is_not() {
-        let plain = Kernel::new(vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }]);
-        assert!(plain.render_body().contains("let b = warp::ballot_sync(0xffff_ffff, true);"));
+        let plain = Kernel::new(vec![Stmt::Ballot {
+            mask: Mask::Literal(0xffff_ffff),
+        }]);
+        assert!(
+            plain
+                .render_body()
+                .contains("let b = warp::ballot_sync(0xffff_ffff, true);")
+        );
 
         let guarded = Kernel::new(vec![Stmt::If {
             pred: even_guard(),
-            body: vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::Literal(0xffff_ffff),
+            }],
         }]);
         let body = guarded.render_body();
         assert!(body.contains("let mut b = 0u32;"));
@@ -620,7 +686,10 @@ mod tests {
     #[test]
     fn two_helper_levels_emit_a_transitive_chain() {
         let k = Kernel::with_helper(
-            vec![Stmt::If { pred: even_guard(), body: vec![Stmt::CallHelper] }],
+            vec![Stmt::If {
+                pred: even_guard(),
+                body: vec![Stmt::CallHelper],
+            }],
             2,
         );
         let items = k.extra_items();
@@ -632,9 +701,19 @@ mod tests {
     fn addresses_locate_the_statement_they_name() {
         let k = Kernel::new(vec![Stmt::If {
             pred: even_guard(),
-            body: vec![Stmt::Barrier, Stmt::Ballot { mask: Mask::ActiveMask }],
+            body: vec![
+                Stmt::Barrier,
+                Stmt::Ballot {
+                    mask: Mask::ActiveMask,
+                },
+            ],
         }]);
-        assert_eq!(k.get(&[0, 1]), Some(&Stmt::Ballot { mask: Mask::ActiveMask }));
+        assert_eq!(
+            k.get(&[0, 1]),
+            Some(&Stmt::Ballot {
+                mask: Mask::ActiveMask
+            })
+        );
         assert_eq!(k.get(&[0, 2]), None);
         assert_eq!(k.walk().len(), 3);
     }

@@ -120,11 +120,15 @@ pub struct Semantics {
 
 impl Semantics {
     pub fn barriers(&self) -> impl Iterator<Item = &Site> {
-        self.sites.iter().filter(|s| s.kind == SiteKind::Barrier && s.executed())
+        self.sites
+            .iter()
+            .filter(|s| s.kind == SiteKind::Barrier && s.executed())
     }
 
     pub fn collectives(&self) -> impl Iterator<Item = &Site> {
-        self.sites.iter().filter(|s| s.kind == SiteKind::Collective && s.executed())
+        self.sites
+            .iter()
+            .filter(|s| s.kind == SiteKind::Collective && s.executed())
     }
 
     pub fn has_divergent_barrier(&self) -> bool {
@@ -142,7 +146,14 @@ pub fn interpret(kernel: &Kernel, launch: Launch) -> Semantics {
     // ---- static pass: the sites and their control context ---------------
     let mut plan: Vec<PlannedSite> = Vec::new();
     let mut loop_index: BTreeMap<String, usize> = BTreeMap::new();
-    collect(&kernel.stmts, &mut Vec::new(), GuardChain::default(), kernel, &mut plan, &mut loop_index);
+    collect(
+        &kernel.stmts,
+        &mut Vec::new(),
+        GuardChain::default(),
+        kernel,
+        &mut plan,
+        &mut loop_index,
+    );
 
     // ---- dynamic pass: run every thread ----------------------------------
     let mut counts: BTreeMap<String, BTreeMap<u32, u32>> = BTreeMap::new();
@@ -182,7 +193,11 @@ pub fn interpret(kernel: &Kernel, launch: Launch) -> Semantics {
                 counts_full.insert(*t, *n);
             }
         }
-        let uniform = counts_full.values().collect::<std::collections::BTreeSet<_>>().len() <= 1;
+        let uniform = counts_full
+            .values()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            <= 1;
         let executed = counts_full.values().any(|c| *c > 0);
 
         let (mut named, mut valid, mut value_defined) = (BTreeMap::new(), None, true);
@@ -250,11 +265,20 @@ pub fn interpret(kernel: &Kernel, launch: Launch) -> Semantics {
         None
     };
 
-    Semantics { launch, sites, oracle, oracle_reason, reference, undefined }
+    Semantics {
+        launch,
+        sites,
+        oracle,
+        oracle_reason,
+        reference,
+        undefined,
+    }
 }
 
 fn derive_oracle(sites: &[Site], threads: u32) -> (ConstructionOracle, String) {
-    if let Some(s) = sites.iter().find(|s| s.executed() && s.kind == SiteKind::Barrier && s.divergent)
+    if let Some(s) = sites
+        .iter()
+        .find(|s| s.executed() && s.kind == SiteKind::Barrier && s.divergent)
     {
         let reaching = s.threads_executing().len();
         return (
@@ -281,7 +305,10 @@ fn derive_oracle(sites: &[Site], threads: u32) -> (ConstructionOracle, String) {
             ),
         );
     }
-    if let Some(s) = sites.iter().find(|s| s.executed() && s.kind == SiteKind::Collective) {
+    if let Some(s) = sites
+        .iter()
+        .find(|s| s.executed() && s.kind == SiteKind::Collective)
+    {
         let (named, present) = describe_mask(s);
         return (
             ConstructionOracle::KnownMaskValid,
@@ -303,7 +330,9 @@ fn derive_oracle(sites: &[Site], threads: u32) -> (ConstructionOracle, String) {
     }
     (
         ConstructionOracle::KnownSafe,
-        format!("the kernel contains no barrier or collective reachable by any of the {threads} threads"),
+        format!(
+            "the kernel contains no barrier or collective reachable by any of the {threads} threads"
+        ),
     )
 }
 
@@ -321,8 +350,16 @@ fn describe_mask(s: &Site) -> (String, String) {
         .collect::<Vec<_>>()
         .join("/");
     (
-        if named.is_empty() { "no lanes".to_string() } else { named },
-        if present.is_empty() { "0".to_string() } else { present },
+        if named.is_empty() {
+            "no lanes".to_string()
+        } else {
+            named
+        },
+        if present.is_empty() {
+            "0".to_string()
+        } else {
+            present
+        },
     )
 }
 
@@ -347,8 +384,7 @@ fn reference_model(
             for t in 0..threads {
                 expected.insert(t, *loop_final.get(&t).unwrap_or(&0));
             }
-            "each lane writes the number of iterations its own trip count gave it"
-                .to_string()
+            "each lane writes the number of iterations its own trip count gave it".to_string()
         }
         WriteExpr::Ballot => {
             for t in 0..threads {
@@ -376,7 +412,11 @@ fn reference_model(
                 .to_string()
         }
     };
-    Some(ReferenceModel { description, expected, launch })
+    Some(ReferenceModel {
+        description,
+        expected,
+        launch,
+    })
 }
 
 // ------------------------------------------------------------ static pass ---
@@ -391,7 +431,10 @@ struct PlannedSite {
 fn key_of(prefix: &str, path: &[usize]) -> String {
     format!(
         "{prefix}@{}",
-        path.iter().map(usize::to_string).collect::<Vec<_>>().join(".")
+        path.iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(".")
     )
 }
 
@@ -552,10 +595,16 @@ mod tests {
 
     #[test]
     fn a_guarded_barrier_is_unsafe_and_ships_no_reference_model() {
-        let k = Kernel::new(vec![Stmt::If { pred: even(), body: vec![Stmt::Barrier] }]);
+        let k = Kernel::new(vec![Stmt::If {
+            pred: even(),
+            body: vec![Stmt::Barrier],
+        }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownUnsafe);
-        assert!(s.reference.is_none(), "undefined execution has no expected values");
+        assert!(
+            s.reference.is_none(),
+            "undefined execution has no expected values"
+        );
         assert!(s.oracle_reason.contains("16 of 32"));
     }
 
@@ -564,8 +613,14 @@ mod tests {
         // Every thread arrives exactly once, and arrival counting might rescue
         // this on hardware. The programming model does not, so neither do we.
         let k = Kernel::new(vec![
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-            Stmt::If { pred: odd(), body: vec![Stmt::Barrier] },
+            Stmt::If {
+                pred: even(),
+                body: vec![Stmt::Barrier],
+            },
+            Stmt::If {
+                pred: odd(),
+                body: vec![Stmt::Barrier],
+            },
         ]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownUnsafe);
@@ -605,7 +660,9 @@ mod tests {
 
     #[test]
     fn a_full_mask_at_a_convergent_call_is_valid_and_predicts_the_value() {
-        let k = Kernel::new(vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }]);
+        let k = Kernel::new(vec![Stmt::Ballot {
+            mask: Mask::Literal(0xffff_ffff),
+        }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownMaskValid);
         assert_eq!(s.reference.unwrap().expected[&7], 0xffff_ffff);
@@ -613,7 +670,9 @@ mod tests {
 
     #[test]
     fn a_shrunk_mask_is_invalid_but_still_has_a_defined_reading() {
-        let k = Kernel::new(vec![Stmt::Ballot { mask: Mask::Literal(0x0000_ffff) }]);
+        let k = Kernel::new(vec![Stmt::Ballot {
+            mask: Mask::Literal(0x0000_ffff),
+        }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownMaskInvalid);
         // Every named lane is present, so the mask it was handed still defines
@@ -626,7 +685,9 @@ mod tests {
     fn a_full_mask_under_divergence_has_no_defined_reading() {
         let k = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Ballot { mask: Mask::Literal(0xffff_ffff) }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::Literal(0xffff_ffff),
+            }],
         }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownMaskInvalid);
@@ -639,20 +700,27 @@ mod tests {
         // The correct guarded partial-warp idiom, spelled with a literal.
         let k = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Ballot { mask: Mask::Literal(0x5555_5555) }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::Literal(0x5555_5555),
+            }],
         }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownMaskValid);
         let r = s.reference.expect("valid, so the value is defined");
         assert_eq!(r.expected[&0], 0x5555_5555, "an even lane reads the ballot");
-        assert_eq!(r.expected[&1], 0, "an odd lane never reaches it and keeps 0");
+        assert_eq!(
+            r.expected[&1], 0,
+            "an odd lane never reaches it and keeps 0"
+        );
     }
 
     #[test]
     fn active_mask_is_valid_by_definition_wherever_it_is_called() {
         let k = Kernel::new(vec![Stmt::If {
             pred: even(),
-            body: vec![Stmt::Ballot { mask: Mask::ActiveMask }],
+            body: vec![Stmt::Ballot {
+                mask: Mask::ActiveMask,
+            }],
         }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownMaskValid);
@@ -667,7 +735,11 @@ mod tests {
         }]);
         let s = interpret(&k, Launch::one_block(32));
         assert_eq!(s.oracle, ConstructionOracle::KnownUnsafe);
-        let site = s.sites.iter().find(|x| x.kind == SiteKind::Barrier).unwrap();
+        let site = s
+            .sites
+            .iter()
+            .find(|x| x.kind == SiteKind::Barrier)
+            .unwrap();
         assert_eq!(site.counts[&0], 0);
         assert_eq!(site.counts[&3], 3);
         assert!(site.guards.divergent_loop);
@@ -676,7 +748,10 @@ mod tests {
     #[test]
     fn a_barrier_behind_a_helper_carries_the_call_sites_context() {
         let k = Kernel::with_helper(
-            vec![Stmt::If { pred: even(), body: vec![Stmt::CallHelper] }],
+            vec![Stmt::If {
+                pred: even(),
+                body: vec![Stmt::CallHelper],
+            }],
             1,
         );
         let s = interpret(&k, Launch::one_block(32));

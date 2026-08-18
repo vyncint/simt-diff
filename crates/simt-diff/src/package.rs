@@ -98,7 +98,8 @@ fn readme(p: &Packaging<'_>) -> String {
     t.push_str("## What was expected, and on whose authority\n\n");
     t.push_str(&format!("Expected: `{:?}`.\n\n", p.record.expected_static));
     if let Some(basis) = &p.record.prediction_basis {
-        t.push_str(&format!("Rule `{}`, provenance **{}**:\n\n> {}\n\n",
+        t.push_str(&format!(
+            "Rule `{}`, provenance **{}**:\n\n> {}\n\n",
             basis.rule,
             basis.provenance.label(),
             basis.provenance.source()
@@ -125,7 +126,10 @@ fn readme(p: &Packaging<'_>) -> String {
         t.push_str("- no findings at any tier\n");
     }
     for f in &p.analysis.findings {
-        t.push_str(&format!("- `{}` at `{:?}`: {}\n", f.code, f.confidence, f.message));
+        t.push_str(&format!(
+            "- `{}` at `{:?}`: {}\n",
+            f.code, f.confidence, f.message
+        ));
         for n in &f.notes {
             t.push_str(&format!("  - {n}\n"));
         }
@@ -138,7 +142,10 @@ fn readme(p: &Packaging<'_>) -> String {
 
     t.push_str("## Reproducing\n\n```sh\n./verify.sh            # exits nonzero if the observation moved\n```\n\n");
     t.push_str("Or by hand, from this directory:\n\n```sh\ncd kernel\ncargo reconverge check --message-format json --strict\nls target/reconverge/witness-*.json 2>/dev/null | wc -l\n```\n\n");
-    t.push_str(&format!("Measured with analyzer version `{}`, toolchain `{}`.\n\n", p.analysis.version, p.toolchain));
+    t.push_str(&format!(
+        "Measured with analyzer version `{}`, toolchain `{}`.\n\n",
+        p.analysis.version, p.toolchain
+    ));
 
     t.push_str("## Reading\n\n");
     for line in &p.verdict.interpretation {
@@ -221,8 +228,7 @@ mod tests {
 
     fn packaging_fixture() -> (GeneratorRecord, AnalyzerRecord) {
         let kernel = crate::mutate::seed("barrier_guarded_by_warp_id").unwrap();
-        let record =
-            crate::mutate::record_for_kernel(&kernel, "test_case", Launch::one_block(32));
+        let record = crate::mutate::record_for_kernel(&kernel, "test_case", Launch::one_block(32));
         let analysis = AnalyzerRecord {
             tool: "reconverge".into(),
             version: "0.1.6".into(),
@@ -262,7 +268,10 @@ mod tests {
         });
 
         assert!(text.contains("## What construction knows"));
-        assert!(text.contains("provenance **quoted**"), "the authority is named");
+        assert!(
+            text.contains("provenance **quoted**"),
+            "the authority is named"
+        );
         assert!(text.contains("statement about the analyzer"));
         assert!(text.contains("rc001/warning|0w"), "the signature is stated");
         assert!(
@@ -301,6 +310,9 @@ mod tests {
         // one that fails to run.
         assert!(VERIFY_SH.contains("json.loads"));
         assert!(VERIFY_SH.contains("findings.v1"));
-        assert!(VERIFY_SH.contains("exit 2"), "an unrunnable check is not a pass");
+        assert!(
+            VERIFY_SH.contains("exit 2"),
+            "an unrunnable check is not a pass"
+        );
     }
 }

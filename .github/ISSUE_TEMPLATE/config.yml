@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A finding about reconverge itself
+    url: https://github.com/vyncint/reconverge/issues
+    about: This repository studies reconverge; bugs in the analyzer belong in its tracker.

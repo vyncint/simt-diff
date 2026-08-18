@@ -46,7 +46,10 @@ impl ReconvergeAnalyzer {
         let mut cmd = Command::new(&self.cli);
         // `cargo-reconverge` is invoked by cargo as `cargo reconverge ...`,
         // so argv[1] is the subcommand name when run directly.
-        cmd.arg("reconverge").arg("check").arg("--message-format").arg("json");
+        cmd.arg("reconverge")
+            .arg("check")
+            .arg("--message-format")
+            .arg("json");
         if self.strict {
             cmd.arg("--strict");
         }
@@ -63,10 +66,7 @@ impl Analyzer for ReconvergeAnalyzer {
     fn analyze(&self, kernel_crate: &Path) -> io::Result<AnalyzerRecord> {
         let mut cmd = self.command(kernel_crate);
         let rendered: Vec<String> = std::iter::once(self.cli.display().to_string())
-            .chain(
-                cmd.get_args()
-                    .map(|a| a.to_string_lossy().to_string()),
-            )
+            .chain(cmd.get_args().map(|a| a.to_string_lossy().to_string()))
             .collect();
 
         let started = Instant::now();

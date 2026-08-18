@@ -32,6 +32,8 @@ Usage:
                                           it interesting
   simt-diff package <case-dir> [OPTS]     write a standalone reproducer directory
   simt-diff corpus add <case-dir> [OPTS]  record a case as a regression entry
+  simt-diff corpus check [OPTS]           rebuild every entry and compare hashes,
+                                          without running the analyzer
   simt-diff regress [OPTS]                rebuild every corpus entry and report
                                           generator or analyzer drift
 
@@ -154,7 +156,14 @@ fn doctor() -> Result<u8, String> {
     println!();
     println!("dynamic stage (needs an NVIDIA GPU)");
     for (label, argv) in [
-        ("nvidia-smi", vec!["nvidia-smi", "--query-gpu=name,compute_cap", "--format=csv,noheader"]),
+        (
+            "nvidia-smi",
+            vec![
+                "nvidia-smi",
+                "--query-gpu=name,compute_cap",
+                "--format=csv,noheader",
+            ],
+        ),
         ("nvcc", vec!["nvcc", "--version"]),
         ("compute-sanitizer", vec!["compute-sanitizer", "--version"]),
         ("cargo-oxide", vec!["cargo-oxide", "--version"]),
@@ -180,7 +189,10 @@ fn doctor() -> Result<u8, String> {
 }
 
 fn probe(argv: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(argv[0]).args(&argv[1..]).output().ok()?;
+    let out = std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -202,7 +214,10 @@ fn locate_reconverge() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    let out = std::process::Command::new("which").arg("cargo-reconverge").output().ok()?;
+    let out = std::process::Command::new("which")
+        .arg("cargo-reconverge")
+        .output()
+        .ok()?;
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
@@ -221,7 +236,9 @@ fn generate(args: &[String]) -> Result<u8, String> {
     let mut i = 1;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
             "--out" => {
@@ -229,15 +246,23 @@ fn generate(args: &[String]) -> Result<u8, String> {
                 i += 2;
             }
             "--seed" => {
-                seed = value(i)?.parse().map_err(|_| "--seed must be a number".to_string())?;
+                seed = value(i)?
+                    .parse()
+                    .map_err(|_| "--seed must be a number".to_string())?;
                 i += 2;
             }
             "--device-path" => {
-                runner_dep = DeviceDep::Path { crates_dir: value(i)? };
+                runner_dep = DeviceDep::Path {
+                    crates_dir: value(i)?,
+                };
                 i += 2;
             }
             "--block" => {
-                blocks.push(value(i)?.parse().map_err(|_| "--block must be a number".to_string())?);
+                blocks.push(
+                    value(i)?
+                        .parse()
+                        .map_err(|_| "--block must be a number".to_string())?,
+                );
                 i += 2;
             }
             other => return Err(format!("unrecognized argument `{other}`")),
@@ -247,7 +272,10 @@ fn generate(args: &[String]) -> Result<u8, String> {
         blocks.push(32);
     }
 
-    let launches = blocks.iter().map(|b| simt_diff::records::Launch::one_block(*b)).collect();
+    let launches = blocks
+        .iter()
+        .map(|b| simt_diff::records::Launch::one_block(*b))
+        .collect();
     let record = template.record(seed, launches);
     let id = templates::case_id(&record);
     let root = out.join(&id);
@@ -292,11 +320,15 @@ fn analyze(args: &[String]) -> Result<u8, String> {
         record.witnesses.len()
     );
     for f in &record.findings {
-        println!("  {:<6} {:<9} {}", f.code, format!("{:?}", f.confidence), f.message);
+        println!(
+            "  {:<6} {:<9} {}",
+            f.code,
+            format!("{:?}", f.confidence),
+            f.message
+        );
     }
     Ok(0)
 }
-
 
 // ------------------------------------------------------------------ mutate ---
 
@@ -312,7 +344,13 @@ struct CorpusSpec {
 
 impl Default for CorpusSpec {
     fn default() -> Self {
-        CorpusSpec { depth: 1, limit: None, seed: 0, block: 32, seed_template: None }
+        CorpusSpec {
+            depth: 1,
+            limit: None,
+            seed: 0,
+            block: 32,
+            seed_template: None,
+        }
     }
 }
 
@@ -321,18 +359,40 @@ fn parse_corpus_args(args: &[String], spec: &mut CorpusSpec) -> Result<Vec<Strin
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         let num = |i: usize| -> Result<u64, String> {
-            value(i)?.parse().map_err(|_| format!("{} needs a number", args[i]))
+            value(i)?
+                .parse()
+                .map_err(|_| format!("{} needs a number", args[i]))
         };
         match args[i].as_str() {
-            "--depth" => { spec.depth = num(i)? as usize; i += 2 }
-            "--limit" => { spec.limit = Some(num(i)? as usize); i += 2 }
-            "--seed" => { spec.seed = num(i)?; i += 2 }
-            "--block" => { spec.block = num(i)? as u32; i += 2 }
-            "--seed-template" => { spec.seed_template = Some(value(i)?); i += 2 }
-            other => { rest.push(other.to_string()); i += 1 }
+            "--depth" => {
+                spec.depth = num(i)? as usize;
+                i += 2
+            }
+            "--limit" => {
+                spec.limit = Some(num(i)? as usize);
+                i += 2
+            }
+            "--seed" => {
+                spec.seed = num(i)?;
+                i += 2
+            }
+            "--block" => {
+                spec.block = num(i)? as u32;
+                i += 2
+            }
+            "--seed-template" => {
+                spec.seed_template = Some(value(i)?);
+                i += 2
+            }
+            other => {
+                rest.push(other.to_string());
+                i += 1
+            }
         }
     }
     Ok(rest)
@@ -378,9 +438,7 @@ fn mutate_cmd(args: &[String]) -> Result<u8, String> {
     while i < args.len() {
         match args[i].as_str() {
             "--source" => {
-                source = Some(
-                    args.get(i + 1).cloned().ok_or("--source needs a case id")?,
-                );
+                source = Some(args.get(i + 1).cloned().ok_or("--source needs a case id")?);
                 i += 2;
             }
             other => {
@@ -402,7 +460,10 @@ fn mutate_cmd(args: &[String]) -> Result<u8, String> {
             .iter()
             .find(|m| m.id == id)
             .ok_or_else(|| format!("no generated case `{id}` in this corpus"))?;
-        print!("{}", simt_diff::mutate::record(m, spec.seed, vec![launch]).kernel_source);
+        print!(
+            "{}",
+            simt_diff::mutate::record(m, spec.seed, vec![launch]).kernel_source
+        );
         return Ok(0);
     }
 
@@ -463,7 +524,6 @@ fn describe_expected(e: &simt_diff::prediction::ExpectedStatic) -> String {
 
 // ------------------------------------------------------------- conformance ---
 
-
 /// Generate every template, analyze it, and report prediction vs behaviour.
 ///
 /// This is the capability report the brief's §33 asks for: the output is a
@@ -480,14 +540,31 @@ fn conformance(args: &[String]) -> Result<u8, String> {
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--out" => { out = PathBuf::from(value(i)?); i += 2 }
-            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
-            "--mutants" => { mutants = true; i += 1 }
-            "--only" => { only = Some(value(i)?); i += 2 }
-            other => { passthrough.push(other.to_string()); i += 1 }
+            "--out" => {
+                out = PathBuf::from(value(i)?);
+                i += 2
+            }
+            "--reconverge" => {
+                cli = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
+            "--mutants" => {
+                mutants = true;
+                i += 1
+            }
+            "--only" => {
+                only = Some(value(i)?);
+                i += 2
+            }
+            other => {
+                passthrough.push(other.to_string());
+                i += 1
+            }
         }
     }
     let leftover = parse_corpus_args(&passthrough, &mut spec)?;
@@ -506,7 +583,10 @@ fn conformance(args: &[String]) -> Result<u8, String> {
             .map(|m| simt_diff::mutate::record(m, spec.seed, vec![launch]))
             .collect()
     } else {
-        templates::TEMPLATES.iter().map(|t| t.record(0, vec![launch])).collect()
+        templates::TEMPLATES
+            .iter()
+            .map(|t| t.record(0, vec![launch]))
+            .collect()
     };
     if let Some(substr) = &only {
         let before = records.len();
@@ -557,7 +637,13 @@ fn conformance(args: &[String]) -> Result<u8, String> {
             report.outcome,
             verdict.classification
         );
-        rows.push(Row { record: record.clone(), analysis, report, verdict, case: id });
+        rows.push(Row {
+            record: record.clone(),
+            analysis,
+            report,
+            verdict,
+            case: id,
+        });
     }
 
     print_conformance(&rows, started.elapsed(), spec.block);
@@ -653,8 +739,10 @@ fn print_conformance(rows: &[Row], elapsed: std::time::Duration, block: u32) {
     }
 
     let violated: Vec<&Row> = rows.iter().filter(|r| r.violated()).collect();
-    let actionable: Vec<&&Row> =
-        violated.iter().filter(|r| r.is_actionable_violation()).collect();
+    let actionable: Vec<&&Row> = violated
+        .iter()
+        .filter(|r| r.is_actionable_violation())
+        .collect();
     let interesting: Vec<&Row> = rows.iter().filter(|r| r.is_interesting()).collect();
 
     println!();
@@ -672,11 +760,19 @@ fn print_conformance(rows: &[Row], elapsed: std::time::Duration, block: u32) {
         actionable.len(),
         violated.len() - actionable.len()
     );
-    println!("  classification: {} case(s) worth a human's attention", interesting.len());
+    println!(
+        "  classification: {} case(s) worth a human's attention",
+        interesting.len()
+    );
 
     for r in &violated {
         println!();
-        println!("VIOLATION/{}  {}  ({})", r.provenance(), r.record.template_id, r.case);
+        println!(
+            "VIOLATION/{}  {}  ({})",
+            r.provenance(),
+            r.record.template_id,
+            r.case
+        );
         println!("    {}", r.report.detail);
         if let Some(basis) = &r.record.prediction_basis {
             println!("    rule: {}", basis.rule);
@@ -697,7 +793,10 @@ fn print_conformance(rows: &[Row], elapsed: std::time::Duration, block: u32) {
 
     for r in &interesting {
         println!();
-        println!("{:?}  {}  ({})", r.verdict.classification, r.record.template_id, r.case);
+        println!(
+            "{:?}  {}  ({})",
+            r.verdict.classification, r.record.template_id, r.case
+        );
         for line in &r.verdict.observed {
             println!("    observed: {line}");
         }
@@ -734,7 +833,6 @@ fn summarize(rows: &[Row]) -> serde_json::Value {
     })
 }
 
-
 // ---------------------------------------------------------------- minimize ---
 
 /// Read the two records a later stage needs from a case directory.
@@ -761,7 +859,11 @@ fn kernel_of(record: &GeneratorRecord) -> Result<simt_diff::ir::Kernel, String> 
         .prediction_basis
         .as_ref()
         .ok_or("this case has no generator recipe; only generated cases can be minimized")?;
-    let launch = record.launches.first().copied().unwrap_or(Launch::one_block(32));
+    let launch = record
+        .launches
+        .first()
+        .copied()
+        .unwrap_or(Launch::one_block(32));
     let entry = simt_diff::corpus::CorpusEntry {
         schema: simt_diff::corpus::SCHEMA.to_string(),
         name: record.template_id.clone(),
@@ -803,23 +905,40 @@ fn minimize_cmd(args: &[String]) -> Result<u8, String> {
     let mut i = 1;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--out" => { out = Some(PathBuf::from(value(i)?)); i += 2 }
-            "--signature-only" => { signature_only = true; i += 1 }
-            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
+            "--out" => {
+                out = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
+            "--signature-only" => {
+                signature_only = true;
+                i += 1
+            }
+            "--reconverge" => {
+                cli = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
             other => return Err(format!("unrecognized argument `{other}`")),
         }
     }
     let cli = cli.ok_or("cargo-reconverge not found; set SIMT_DIFF_RECONVERGE")?;
     let (record, analysis) = load_case(&root)?;
     let kernel = kernel_of(&record)?;
-    let launch = record.launches.first().copied().unwrap_or(Launch::one_block(32));
+    let launch = record
+        .launches
+        .first()
+        .copied()
+        .unwrap_or(Launch::one_block(32));
     let sem = simt_diff::interpret::interpret(&kernel, launch);
 
     let property = if signature_only {
-        simt_diff::minimize::Property::Signature { signature: analysis.signature() }
+        simt_diff::minimize::Property::Signature {
+            signature: analysis.signature(),
+        }
     } else {
         simt_diff::minimize::Property::of(&sem, &analysis)
     };
@@ -836,8 +955,7 @@ fn minimize_cmd(args: &[String]) -> Result<u8, String> {
         device_dep: DeviceDep::default(),
     };
     let outcome = minimizer.run(&kernel)?;
-    simt_diff::minimize::write_report(&workdir, &outcome, &property)
-        .map_err(|e| e.to_string())?;
+    simt_diff::minimize::write_report(&workdir, &outcome, &property).map_err(|e| e.to_string())?;
 
     println!(
         "{} -> {} nodes in {} step(s), {} analyzer run(s)",
@@ -865,11 +983,19 @@ fn package_cmd(args: &[String]) -> Result<u8, String> {
     let mut i = 1;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--out" => { out = Some(PathBuf::from(value(i)?)); i += 2 }
-            "--finding" => { finding = Some(value(i)?); i += 2 }
+            "--out" => {
+                out = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
+            "--finding" => {
+                finding = Some(value(i)?);
+                i += 2
+            }
             other => return Err(format!("unrecognized argument `{other}`")),
         }
     }
@@ -910,7 +1036,11 @@ fn toolchain_pin() -> String {
     let text = std::fs::read_to_string("rust-toolchain.toml").unwrap_or_default();
     for line in text.lines() {
         if let Some(rest) = line.trim().strip_prefix("channel") {
-            return rest.trim_start_matches([' ', '=']).trim().trim_matches('"').to_string();
+            return rest
+                .trim_start_matches([' ', '='])
+                .trim()
+                .trim_matches('"')
+                .to_string();
         }
     }
     "unknown".to_string()
@@ -921,9 +1051,79 @@ fn toolchain_pin() -> String {
 fn corpus_cmd(args: &[String]) -> Result<u8, String> {
     match args.first().map(String::as_str) {
         Some("add") => corpus_add(&args[1..]),
-        Some(other) => Err(format!("unknown corpus subcommand `{other}`; try `add`")),
-        None => Err("corpus needs a subcommand: add".to_string()),
+        Some("check") => corpus_check(&args[1..]),
+        Some(other) => Err(format!(
+            "unknown corpus subcommand `{other}`; try `add` or `check`"
+        )),
+        None => Err("corpus needs a subcommand: add or check".to_string()),
     }
+}
+
+/// Generator drift only: rebuild each entry from its recipe and compare the
+/// kernel hash.
+///
+/// Split out from `regress` so it can gate CI. Analyzer drift needs the
+/// analyzer, which needs the pinned nightly and a built `cargo-reconverge`;
+/// generator drift is this repository's own invariant and costs a second.
+fn corpus_check(args: &[String]) -> Result<u8, String> {
+    let mut dir = PathBuf::from("corpus");
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--corpus" => {
+                dir = PathBuf::from(args.get(i + 1).cloned().ok_or("--corpus needs a value")?);
+                i += 2;
+            }
+            other => return Err(format!("unrecognized argument `{other}`")),
+        }
+    }
+    let entries = simt_diff::corpus::load_dir(&dir)?;
+    if entries.is_empty() {
+        return Err(format!("no entries in {}", dir.display()));
+    }
+
+    let mut drifted = 0usize;
+    for entry in &entries {
+        match simt_diff::corpus::regenerate(entry) {
+            Err(e) => {
+                println!("BROKEN          {}: {e}", entry.name);
+                drifted += 1;
+            }
+            Ok(kernel) => {
+                let record = simt_diff::mutate::record_from_recipe(
+                    &entry.template_id,
+                    &entry.seed_template,
+                    &entry.lineage,
+                    &kernel,
+                    entry.launch,
+                );
+                if record.kernel_sha256 == entry.kernel_sha256 {
+                    println!("ok              {}", entry.name);
+                } else {
+                    println!(
+                        "GENERATOR DRIFT {}: recipe now builds {}… , entry records {}…",
+                        entry.name,
+                        &record.kernel_sha256[..12],
+                        &entry.kernel_sha256[..12]
+                    );
+                    drifted += 1;
+                }
+            }
+        }
+    }
+    println!();
+    println!(
+        "{} entry(ies), {drifted} rebuilt differently",
+        entries.len()
+    );
+    if drifted > 0 {
+        println!(
+            "A corpus entry that no longer rebuilds is not evidence of anything. \
+             Either the operator change was intended -- re-record the entry with \
+             `corpus add` and say so -- or it was not."
+        );
+    }
+    Ok(u8::from(drifted > 0))
 }
 
 fn corpus_add(args: &[String]) -> Result<u8, String> {
@@ -935,13 +1135,27 @@ fn corpus_add(args: &[String]) -> Result<u8, String> {
     let mut i = 1;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--corpus" => { dir = PathBuf::from(value(i)?); i += 2 }
-            "--name" => { name = Some(value(i)?); i += 2 }
-            "--finding" => { finding = Some(value(i)?); i += 2 }
-            "--note" => { note = value(i)?; i += 2 }
+            "--corpus" => {
+                dir = PathBuf::from(value(i)?);
+                i += 2
+            }
+            "--name" => {
+                name = Some(value(i)?);
+                i += 2
+            }
+            "--finding" => {
+                finding = Some(value(i)?);
+                i += 2
+            }
+            "--note" => {
+                note = value(i)?;
+                i += 2
+            }
             other => return Err(format!("unrecognized argument `{other}`")),
         }
     }
@@ -961,7 +1175,11 @@ fn corpus_add(args: &[String]) -> Result<u8, String> {
         template_id: record.template_id.clone(),
         seed_template: basis.seed_template.clone(),
         lineage: basis.mutation_lineage.clone(),
-        launch: record.launches.first().copied().unwrap_or(Launch::one_block(32)),
+        launch: record
+            .launches
+            .first()
+            .copied()
+            .unwrap_or(Launch::one_block(32)),
         oracle: record.oracle,
         kernel_sha256: record.kernel_sha256.clone(),
         expected_signature: analysis.signature(),
@@ -1002,7 +1220,20 @@ fn today() -> String {
         y += 1;
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let months = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0;
     while d >= months[m] {
         d -= months[m];
@@ -1018,12 +1249,23 @@ fn regress_cmd(args: &[String]) -> Result<u8, String> {
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--corpus" => { dir = PathBuf::from(value(i)?); i += 2 }
-            "--out" => { work = PathBuf::from(value(i)?); i += 2 }
-            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
+            "--corpus" => {
+                dir = PathBuf::from(value(i)?);
+                i += 2
+            }
+            "--out" => {
+                work = PathBuf::from(value(i)?);
+                i += 2
+            }
+            "--reconverge" => {
+                cli = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
             other => return Err(format!("unrecognized argument `{other}`")),
         }
     }
@@ -1063,7 +1305,10 @@ fn regress_cmd(args: &[String]) -> Result<u8, String> {
         println!();
         println!("{}  {}", drift.label(), entry.name);
         println!("    finding: {}", entry.finding);
-        println!("    measured {} with analyzer {}", entry.measured_on, entry.analyzer_version);
+        println!(
+            "    measured {} with analyzer {}",
+            entry.measured_on, entry.analyzer_version
+        );
         println!("    {detail}");
         if !entry.note.is_empty() {
             println!("    note: {}", entry.note);
@@ -1124,7 +1369,6 @@ fn regress_one(
 
 // ------------------------------------------------------------------ ingest ---
 
-
 /// Record a run that happened on another host.
 ///
 /// The execution stage needs a GPU and the analysis stage does not, so the
@@ -1144,16 +1388,39 @@ fn ingest(args: &[String]) -> Result<u8, String> {
     let mut i = 1;
     while i < args.len() {
         let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+            args.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", args[i]))
         };
         match args[i].as_str() {
-            "--stdout" => { stdout_path = Some(PathBuf::from(value(i)?)); i += 2 }
-            "--sanitizer" => { sanitizer_path = Some(PathBuf::from(value(i)?)); i += 2 }
-            "--block" => { block = Some(value(i)?.parse().map_err(|_| "--block")?); i += 2 }
-            "--seconds" => { seconds = value(i)?.parse().map_err(|_| "--seconds")?; i += 2 }
-            "--watchdog" => { watchdog = value(i)?.parse().map_err(|_| "--watchdog")?; i += 2 }
-            "--outcome" => { outcome = value(i)?; i += 2 }
-            "--provenance" => { provenance = value(i)?; i += 2 }
+            "--stdout" => {
+                stdout_path = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
+            "--sanitizer" => {
+                sanitizer_path = Some(PathBuf::from(value(i)?));
+                i += 2
+            }
+            "--block" => {
+                block = Some(value(i)?.parse().map_err(|_| "--block")?);
+                i += 2
+            }
+            "--seconds" => {
+                seconds = value(i)?.parse().map_err(|_| "--seconds")?;
+                i += 2
+            }
+            "--watchdog" => {
+                watchdog = value(i)?.parse().map_err(|_| "--watchdog")?;
+                i += 2
+            }
+            "--outcome" => {
+                outcome = value(i)?;
+                i += 2
+            }
+            "--provenance" => {
+                provenance = value(i)?;
+                i += 2
+            }
             other => return Err(format!("unrecognized argument `{other}`")),
         }
     }
@@ -1163,9 +1430,9 @@ fn ingest(args: &[String]) -> Result<u8, String> {
         None => return Err("ingest needs --stdout".into()),
     };
     let (parsed_block, observed) = simt_diff::runner_output::parse(&text)?;
-    let block = block.or(parsed_block).ok_or(
-        "no BLOCK= line in the output and no --block given",
-    )?;
+    let block = block
+        .or(parsed_block)
+        .ok_or("no BLOCK= line in the output and no --block given")?;
 
     let outcome = simt_diff::runner_output::outcome_from_str(&outcome)?;
     let record = GpuRunRecord {
@@ -1215,7 +1482,8 @@ fn compare(args: &[String]) -> Result<u8, String> {
     let analyzer: AnalyzerRecord = read_json(&root.join("analyzer.json"))
         .map_err(|e| format!("{e} -- run `simt-diff analyze` first"))?;
     let runs: Vec<GpuRunRecord> = read_json(&root.join("gpu.json")).unwrap_or_default();
-    let sanitizer: Vec<SanitizerRecord> = read_json(&root.join("sanitizer.json")).unwrap_or_default();
+    let sanitizer: Vec<SanitizerRecord> =
+        read_json(&root.join("sanitizer.json")).unwrap_or_default();
 
     let result = classify(&Evidence {
         generator: &generator,
