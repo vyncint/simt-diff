@@ -17,10 +17,14 @@ on:
     - cron: "41 6 * * 1"
   workflow_dispatch:
     inputs:
-      ref:
-        description: reconverge ref to scan
+      version:
+        description: published version to scan, or "latest"
         required: false
-        default: main
+        default: latest
+      ref:
+        description: git ref to scan instead of a published version
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -41,7 +45,8 @@ jobs:
       - id: analyzer
         uses: ./.github/actions/analyzer
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          version: ${{ inputs.version || 'latest' }}
+          ref: ${{ inputs.ref }}
 
       - name: Materialize this repository's toolchain
         run: |
@@ -64,10 +69,10 @@ jobs:
       - name: Summarize
         if: always()
         env:
-          SHA: ${{ steps.analyzer.outputs.sha }}
+          SOURCE: ${{ steps.analyzer.outputs.source }}
         run: |
           {
-            echo "## block=${{ matrix.block }} against reconverge \`${SHA:0:12}\`"
+            echo "## block=${{ matrix.block }} against reconverge $SOURCE"
             echo
             echo '```'
             grep -E "^[0-9]+ case|prediction:|classification:" sweep.txt || tail -n 20 sweep.txt
@@ -84,7 +89,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sweep-block${{ matrix.block }}-${{ steps.analyzer.outputs.sha }}
+          name: sweep-block${{ matrix.block }}-${{ steps.analyzer.outputs.version }}
           path: |
             sweep.txt
             cases-${{ matrix.block }}/conformance.json

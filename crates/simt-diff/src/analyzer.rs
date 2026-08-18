@@ -102,11 +102,35 @@ impl Analyzer for ReconvergeAnalyzer {
         })
     }
 
+    /// Ask the binary what it is.
+    ///
+    /// This used to return a hardcoded `0.1.6`, which was fine while there was
+    /// one build on one machine and actively wrong the moment a scan started
+    /// installing published releases: every corpus entry recorded the same
+    /// version regardless of what it was measured against, which is the one
+    /// field that makes a recorded observation checkable later.
+    ///
+    /// `SIMT_DIFF_RECONVERGE_VERSION` still overrides, for a build that cannot
+    /// report its own version. `unknown` is honest; a made-up number is not.
     fn version(&self) -> io::Result<String> {
-        // The CLI has no --version of its own; the pinned crate version is
-        // what the artifacts carry, and every findings.v1 document repeats
-        // it, so read it from output when available.
-        Ok(std::env::var("SIMT_DIFF_RECONVERGE_VERSION").unwrap_or_else(|_| "0.1.6".to_string()))
+        if let Ok(v) = std::env::var("SIMT_DIFF_RECONVERGE_VERSION")
+            && !v.trim().is_empty()
+        {
+            return Ok(v.trim().to_string());
+        }
+        let mut cmd = Command::new(&self.cli);
+        cmd.arg("reconverge").arg("--version");
+        if let Some(dir) = &self.driver_dir {
+            let path = std::env::var("PATH").unwrap_or_default();
+            cmd.env("PATH", format!("{}:{}", dir.display(), path));
+        }
+        let reported = cmd.output().ok().and_then(|out| {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            text.split_whitespace()
+                .find(|word| word.chars().next().is_some_and(|c| c.is_ascii_digit()))
+                .map(str::to_string)
+        });
+        Ok(reported.unwrap_or_else(|| "unknown".to_string()))
     }
 }
 
