@@ -37,9 +37,20 @@ runs:
     # pin has to come from somewhere; ours is the one every recorded observation
     # was made with. If reconverge moves its pin, the install fails loudly rather
     # than silently testing a mismatched driver.
+    #
+    # The components are the part that is easy to get wrong, and did get wrong
+    # once: `reconverge-driver` links the compiler's own crates -- rustc_driver,
+    # rustc_interface, rustc_middle, rustc_public -- which ship in `rustc-dev`,
+    # not in a default toolchain. Building from a git checkout hid this, because
+    # `rustup toolchain install` there honoured reconverge's toolchain file;
+    # installing from crates.io there is no such file, and the build failed with
+    # four E0463s. They are added here rather than to this repository's own
+    # rust-toolchain.toml so the ~200 MB download lands only in the scan jobs
+    # that need it, not in every CI job.
     - shell: bash
       run: |
         rustup toolchain install
+        rustup component add rustc-dev llvm-tools rust-src
         rustup show
 
     - id: pick
