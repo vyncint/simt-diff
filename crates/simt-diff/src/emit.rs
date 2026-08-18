@@ -105,12 +105,17 @@ pub fn emit(
     fs::write(
         runner_crate.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"case-runner\"\nversion = \"0.0.0\"\n\
+            "[package]\nname = \"{}\"\nversion = \"0.0.0\"\n\
              edition = \"2024\"\npublish = false\n\n[workspace]\n\n\
              [dependencies]\n\
              cuda-device = {}\n\
              cuda-host = {}\n\
              cuda-core = {}\n",
+            // Named after the case, not a constant: several runners live side by
+            // side as examples inside a cuda-oxide checkout, and identical
+            // package names would collide there. The case id is derived from the
+            // kernel, so this does not change any case's identity.
+            runner_package_name(record),
             runner_dep.spec("cuda-device"),
             runner_dep.spec("cuda-host"),
             runner_dep.spec("cuda-core")
@@ -127,6 +132,12 @@ pub fn emit(
 /// The host program. It prints one `VALUES=` line so the comparison engine
 /// can read back per-lane values -- which the baseline's §9.5 showed is the
 /// only channel that distinguishes a valid mask from an invalid one.
+/// `case_<id>`: a valid crate name, and the binary name a GPU host builds with
+/// `cargo oxide build case_<id>`.
+pub fn runner_package_name(record: &GeneratorRecord) -> String {
+    format!("case_{}", crate::templates::case_id(record))
+}
+
 fn runner_main(record: &GeneratorRecord) -> String {
     let default_block = record.launches.first().map_or(32, |l: &Launch| l.block.0);
     format!(
@@ -276,5 +287,38 @@ mod tests {
             runner.contains("unwrap_or(64)"),
             "default block comes from the launch"
         );
+    }
+
+    #[test]
+    fn each_runner_is_named_after_its_case_so_several_can_coexist() {
+        // Execution happens by copying runner crates into a cuda-oxide checkout
+        // as examples. A constant package name meant only one case could be
+        // staged at a time, which is why the launch matrix needed this.
+        let a = crate::mutate::record_for_kernel(
+            &crate::mutate::seed("barrier_divergent_intra_warp").unwrap(),
+            "a",
+            Launch::one_block(64),
+        );
+        let b = crate::mutate::record_for_kernel(
+            &crate::mutate::seed("barrier_guarded_by_warp_id").unwrap(),
+            "b",
+            Launch::one_block(64),
+        );
+        let (na, nb) = (runner_package_name(&a), runner_package_name(&b));
+        assert_ne!(na, nb);
+        assert!(na.starts_with("case_"), "{na} must be a valid crate name");
+        assert!(
+            na.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "{na} must be a valid crate name"
+        );
+
+        // And the name is a function of the case, not of the launch it is run
+        // at: the same kernel at another block size is a different case id.
+        let a32 = crate::mutate::record_for_kernel(
+            &crate::mutate::seed("barrier_divergent_intra_warp").unwrap(),
+            "a",
+            Launch::one_block(32),
+        );
+        assert_ne!(runner_package_name(&a32), na);
     }
 }
