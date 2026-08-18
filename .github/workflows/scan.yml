@@ -1,0 +1,120 @@
+name: scan
+
+# Continuous scan of the analyzer under test.
+#
+# The regression corpus records nine observations of reconverge's behaviour, each
+# with the version it was measured against. This workflow rebuilds reconverge
+# from `main` daily and re-runs them. A signature that moves is the whole point
+# of the corpus existing: it means the analyzer changed, and the change is either
+# news to celebrate or news to file.
+#
+# The fast, sharp signal lives here. The full launch matrix is weekly, in
+# scan-matrix.yml, because it costs twenty minutes rather than one.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: reconverge ref to scan
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  regress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: analyzer
+        uses: ./.github/actions/analyzer
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Materialize this repository's toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+
+      # Generator drift first: if our own recipes stopped rebuilding, every
+      # signature below would be about a different program and the scan would
+      # report analyzer drift that does not exist.
+      - name: Generator drift
+        run: ./scripts/check-corpus.sh
+
+      - name: Analyzer drift
+        id: regress
+        env:
+          SIMT_DIFF_RECONVERGE: ${{ steps.analyzer.outputs.bin }}
+          SIMT_DIFF_RECONVERGE_VERSION: ${{ steps.analyzer.outputs.version }}
+        run: |
+          set +e
+          cargo run --quiet -p simt-diff -- regress --out "$RUNNER_TEMP/cases" > regress.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat regress.txt
+
+      - name: Summarize
+        if: always()
+        env:
+          SHA: ${{ steps.analyzer.outputs.sha }}
+          VERSION: ${{ steps.analyzer.outputs.version }}
+        run: |
+          {
+            echo "## Scan of reconverge \`${SHA:0:12}\` (version $VERSION)"
+            echo
+            echo '```'
+            tail -n 40 regress.txt 2>/dev/null || echo "no regress output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regress-${{ steps.analyzer.outputs.sha }}
+          path: regress.txt
+          if-no-files-found: warn
+
+      # One issue per drifting commit, not one per scheduled run: a scan that
+      # files the same report every morning trains its reader to ignore it.
+      - name: File drift
+        if: steps.regress.outputs.exit != 'exit=0' && steps.regress.outputs.exit != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.analyzer.outputs.sha }}
+          VERSION: ${{ steps.analyzer.outputs.version }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          short="${SHA:0:12}"
+          title="scan: corpus drift against reconverge $short"
+          if gh issue list --repo "$REPO" --state all --search "\"$short\" in:title" --json title --jq '.[].title' | grep -qF "$title"; then
+            echo "already filed for $short"
+            exit 0
+          fi
+          {
+            echo "A scheduled scan found a recorded observation that no longer holds."
+            echo
+            echo "- reconverge commit: \`$SHA\` (version \`$VERSION\`)"
+            echo "- run: $RUN"
+            echo
+            echo "\`ANALYZER DRIFT\` means the same program now gets a different answer, which is"
+            echo "what the corpus exists to catch. \`GENERATOR DRIFT\` would mean this repository"
+            echo "changed instead — the generator gate ran first and passed, so that is unlikely here."
+            echo
+            echo '```'
+            cat regress.txt
+            echo '```'
+            echo
+            echo "Next: decide per entry whether the new behaviour is an improvement (re-record"
+            echo "the entry and say why in the PR) or a regression (file it upstream with the"
+            echo "packaged reproducer)."
+          } > body.md
+          gh issue create --repo "$REPO" --title "$title" --label corpus-drift --body-file body.md

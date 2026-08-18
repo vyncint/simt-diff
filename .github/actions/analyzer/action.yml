@@ -1,0 +1,66 @@
+name: Build the analyzer under test
+description: >
+  Check out reconverge at a given ref, build cargo-reconverge and its driver on
+  the pinned nightly, and report the binary path and the exact commit scanned.
+
+inputs:
+  ref:
+    description: reconverge ref to scan (branch, tag or SHA)
+    required: false
+    default: main
+
+outputs:
+  bin:
+    description: Absolute path to the cargo-reconverge binary
+    value: ${{ steps.build.outputs.bin }}
+  sha:
+    description: The reconverge commit actually scanned
+    value: ${{ steps.checkout.outputs.sha }}
+  version:
+    description: reconverge's workspace version at that commit
+    value: ${{ steps.build.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: checkout
+      shell: bash
+      run: |
+        git clone --quiet https://github.com/vyncint/reconverge.git "$RUNNER_TEMP/reconverge"
+        cd "$RUNNER_TEMP/reconverge"
+        git checkout --quiet "${{ inputs.ref }}"
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "scanning reconverge $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
+
+    # A rustc-driver tool must be built by the exact rustc it wraps, and both
+    # repositories pin the same nightly. Installing from reconverge's own
+    # rust-toolchain.toml is what keeps that true if either pin moves.
+    - shell: bash
+      working-directory: ${{ runner.temp }}/reconverge
+      run: |
+        rustup toolchain install
+        rustup show
+
+    # First-party cache on purpose: this workflow builds a third party's code on
+    # a schedule, so the action surface stays as small as the rest of the repo's.
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/reconverge/target
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: analyzer-${{ runner.os }}-${{ steps.checkout.outputs.sha }}
+        restore-keys: |
+          analyzer-${{ runner.os }}-
+
+    - id: build
+      shell: bash
+      working-directory: ${{ runner.temp }}/reconverge
+      run: |
+        cargo build --release -p cargo-reconverge -p reconverge-driver
+        bin="$PWD/target/release/cargo-reconverge"
+        test -x "$bin" || { echo "cargo-reconverge did not build" >&2; exit 1; }
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
+        version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "built cargo-reconverge $version"

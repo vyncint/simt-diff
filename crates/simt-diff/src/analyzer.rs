@@ -64,6 +64,13 @@ impl ReconvergeAnalyzer {
 
 impl Analyzer for ReconvergeAnalyzer {
     fn analyze(&self, kernel_crate: &Path) -> io::Result<AnalyzerRecord> {
+        // Witness artifacts are read off disk afterwards, so a previous run's
+        // files in the same crate directory would be counted as this run's.
+        // `regress` re-analyzes into one working directory by design, and a
+        // stale `witness-*.json` there turns "declined to promote" into
+        // "promoted" -- silently, and in the direction that hides a regression.
+        let _ = std::fs::remove_dir_all(kernel_crate.join("target").join("reconverge"));
+
         let mut cmd = self.command(kernel_crate);
         let rendered: Vec<String> = std::iter::once(self.cli.display().to_string())
             .chain(cmd.get_args().map(|a| a.to_string_lossy().to_string()))

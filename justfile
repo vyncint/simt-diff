@@ -35,3 +35,9 @@ regress:
 # the generated corpus and what the model predicts for it, no analyzer needed
 mutants:
     cargo run -p simt-diff -- mutate --depth 1
+
+# the launch matrix, static half: the block sizes no model rule was fitted to
+matrix:
+    cargo run -p simt-diff -- conformance --mutants --depth 1 --block 32 --out cases-b32
+    cargo run -p simt-diff -- conformance --mutants --depth 1 --block 64 --out cases-b64
+    cargo run -p simt-diff -- conformance --mutants --depth 1 --block 128 --out cases-b128

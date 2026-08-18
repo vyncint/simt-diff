@@ -1,0 +1,102 @@
+name: scan-matrix
+
+# The launch matrix, weekly.
+#
+# Every rule in the model was fitted at grid=1, block=32. Block size is a
+# dimension none of them was fitted to, and it is the one where the construction
+# oracle genuinely moves: a `warp_id()`-guarded barrier is safe at 32 threads —
+# one warp, the guard is uniform — and unsafe at 64, where a whole warp skips a
+# block-wide barrier. The prediction does not move. So a prediction violation
+# here is a real finding, and a clean sheet is real evidence.
+#
+# This is the static half only. Executing multi-warp cases needs a GPU and
+# happens by hand; see docs/stage-6.md.
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: reconverge ref to scan
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        block: [32, 64, 128]
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: analyzer
+        uses: ./.github/actions/analyzer
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Materialize this repository's toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+
+      - name: Sweep
+        id: sweep
+        env:
+          SIMT_DIFF_RECONVERGE: ${{ steps.analyzer.outputs.bin }}
+          SIMT_DIFF_RECONVERGE_VERSION: ${{ steps.analyzer.outputs.version }}
+        run: |
+          set +e
+          cargo run --quiet -p simt-diff -- conformance --mutants --depth 1 \
+            --block ${{ matrix.block }} --out "$RUNNER_TEMP/cases-${{ matrix.block }}" \
+            > sweep.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          tail -n 60 sweep.txt
+
+      - name: Summarize
+        if: always()
+        env:
+          SHA: ${{ steps.analyzer.outputs.sha }}
+        run: |
+          {
+            echo "## block=${{ matrix.block }} against reconverge \`${SHA:0:12}\`"
+            echo
+            echo '```'
+            grep -E "^[0-9]+ case|prediction:|classification:" sweep.txt || tail -n 20 sweep.txt
+            echo '```'
+            if grep -q "^VIOLATION" sweep.txt; then
+              echo
+              echo "### Violations"
+              echo '```'
+              grep -A 4 "^VIOLATION" sweep.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-block${{ matrix.block }}-${{ steps.analyzer.outputs.sha }}
+          path: |
+            sweep.txt
+            ${{ runner.temp }}/cases-${{ matrix.block }}/conformance.json
+          if-no-files-found: warn
+
+      # A violated prediction is not automatically a failure: an extrapolated
+      # rule failing is a finding about this model. The exit code says "a human
+      # should look", and the summary above says at what.
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ steps.sweep.outputs.exit }}" != "0" ]; then
+            echo "block=${{ matrix.block }}: something in this sweep wants a human — see the summary" >&2
+            exit 1
+          fi
