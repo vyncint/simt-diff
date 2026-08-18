@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "unreachable-barrier-still-reported",
+  "finding": "A barrier no thread of the launch can reach is still reported, at warning tier, with no witness",
+  "template_id": "barrier_divergent_nested+invert_guard@0",
+  "seed_template": "barrier_divergent_nested",
+  "lineage": [
+    "invert_guard@0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_SAFE",
+  "kernel_sha256": "faf87345488d3ef8a975d228dc325a2b52c60c7a0fa4259458c2fc6780ca983b",
+  "expected_signature": "rc001/warning|0w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "Undocumented but defensible: a launch contract is a declaration, not a proof. Never gates, so not a false positive by reconverge's own ladder."
+}

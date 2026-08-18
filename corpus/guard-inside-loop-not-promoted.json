@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "guard-inside-loop-not-promoted",
+  "finding": "A divergent guard inside a loop is seen but never witness-promoted",
+  "template_id": "barrier_divergent_intra_warp+wrap_in_loop@0",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [
+    "wrap_in_loop@0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "7e7267f96e1e6fe2e4bc4cd42f6a829f349162e941e86e57fba04f7dd166b26e",
+  "expected_signature": "rc001/warning|0w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "Undocumented: reconverge's Limitations section does not mention loops. Pairs with loop-inside-guard-is-promoted."
+}

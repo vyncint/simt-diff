@@ -1,0 +1,42 @@
+{
+  "analyzer_version": "0.1.6",
+  "exit_code": 0,
+  "expected_static": {
+    "code": "RC001",
+    "kind": "warning_only"
+  },
+  "finding": "A warp_id()-guarded barrier added above a confirmable one takes it out of the CI gate",
+  "kernel_sha256": "9a526b56d46346e222a2c6a6f9d9b98131a48f5a28fc287af7d8ab2d9adcc311",
+  "launches": [
+    {
+      "block": [
+        32,
+        1,
+        1
+      ],
+      "grid": [
+        1,
+        1,
+        1
+      ],
+      "shared_mem_bytes": 0
+    }
+  ],
+  "oracle": "KNOWN_UNSAFE",
+  "oracle_reason": "the barrier at barrier@1.0 is reached by 16 of 32 threads of the block, so threads disagree at a block-wide barrier",
+  "prediction_basis": {
+    "mutation_lineage": [
+      "prepend_lane_env_sibling@0.0"
+    ],
+    "provenance": {
+      "evidence": "measured on reconverge 0.1.6, the fifth version of this rule; the four before it were each refuted by a case built to test them, and the sequence is written out in docs/stage-4.md. What fits every multi-site case in three corpora: promotion reaches an unbroken PREFIX of the divergence sources in program order -- call sites skipped, since a summary-based finding is never witness-replayed -- and stops at the first source that differs from the first one. So `A, B` promotes only A; `!A, !A` promotes both, with two witness artifacts; `A, !A, !A` promotes only A; and `A, B, A` -- the first guard cloned to the end past a different one -- promotes only the first A, even though the third site's source is the witnessed one. If that first source is unevaluable (a lane-environment read, or a guard inside a loop) the prefix is empty and nothing in the function is promoted, which is where the consequence lives: a `warp_id()`-guarded barrier added ABOVE an existing confirmable one silently takes it out of the CI gate, while the same barrier added below changes nothing. The mechanism remains unexplained. The next experiment that would break this: `A, A, B, A`, where a prefix rule promotes exactly the first two",
+      "kind": "measured"
+    },
+    "rule": "outside_the_witnessed_prefix",
+    "seed_template": "barrier_divergent_intra_warp"
+  },
+  "schema": "simt-diff.expected.v1",
+  "signature": "rc001/warning,rc001/warning|0w",
+  "toolchain": "nightly-2026-04-03",
+  "witnesses": 0
+}

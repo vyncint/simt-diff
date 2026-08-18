@@ -18,12 +18,15 @@
 
 pub mod analyzer;
 pub mod classify;
+pub mod corpus;
 pub mod emit;
 pub mod interpret;
 pub mod ir;
+pub mod minimize;
 pub mod model;
 pub mod mutate;
 pub mod oracle;
+pub mod package;
 pub mod prediction;
 pub mod records;
 pub mod runner_output;

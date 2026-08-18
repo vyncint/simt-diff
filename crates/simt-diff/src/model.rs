@@ -122,24 +122,23 @@ const M_GUARD_INSIDE_LOOP: &str = "measured on reconverge 0.1.6, minimized in th
     divergent guard inside a loop is not, and the loop's own trip count does not \
     matter (uniform and thread-derived bounds behave identically). No \
     documentation mentions loops at all";
-const M_ONE_WITNESSED_SOURCE: &str = "measured on reconverge 0.1.6. Three versions of this rule were \
-    wrong before this one, and each was refuted by a case built to demonstrate \
-    it. (a) Two barriers under evaluable guards give RC001/confirmed plus \
-    RC001/warning, so the second is not promoted. (b) Making the *first* guard a \
-    lane-environment read drops both to warning, while appending such a barrier \
-    after a confirmable one changes nothing -- which killed \"the effect is \
-    function-wide\". (c) Two barriers under *identical* guards are BOTH \
-    confirmed, with two witness artifacts -- which killed \"only the first \
-    finding is ever promoted\". (d) A held-out case, \
-    `collective_under_divergence+mask_single_lane@0.0+complementary_guard@0`, \
-    predicted gating and came back warning: its first collective is fine and its \
-    second names an absent lane, and neither was promoted. What fits all of it: \
-    the witness pass attempts the first divergence source in program order, \
-    skipping call sites, and promotes exactly those findings that share that \
-    source. An unevaluable first source (a lane-environment read, or a guard \
-    inside a loop) leaves nothing in the function promotable. The mechanism \
-    behind that choice is still not established; the discriminating experiment \
-    is named in docs/stage-4.md";
+const M_WITNESSED_PREFIX: &str = "measured on reconverge 0.1.6, the fifth version of this rule; the \
+    four before it were each refuted by a case built to test them, and the \
+    sequence is written out in docs/stage-4.md. What fits every multi-site case \
+    in three corpora: promotion reaches an unbroken PREFIX of the divergence \
+    sources in program order -- call sites skipped, since a summary-based finding \
+    is never witness-replayed -- and stops at the first source that differs from \
+    the first one. So `A, B` promotes only A; `!A, !A` promotes both, with two \
+    witness artifacts; `A, !A, !A` promotes only A; and `A, B, A` -- the first \
+    guard cloned to the end past a different one -- promotes only the first A, \
+    even though the third site's source is the witnessed one. If that first \
+    source is unevaluable (a lane-environment read, or a guard inside a loop) the \
+    prefix is empty and nothing in the function is promoted, which is where the \
+    consequence lives: a `warp_id()`-guarded barrier added ABOVE an existing \
+    confirmable one silently takes it out of the CI gate, while the same barrier \
+    added below changes nothing. The mechanism remains unexplained. The next \
+    experiment that would break this: `A, A, B, A`, where a prefix rule promotes \
+    exactly the first two";
 const M_UNREACHABLE: &str = "measured on reconverge 0.1.6, case \
     `barrier_divergent_nested+invert_guard@0`: a barrier no thread of the \
     declared launch can reach was still reported RC001, at warning tier, with no \
@@ -163,7 +162,7 @@ pub fn predict(sem: &Semantics) -> ModelPrediction {
     // warning tier: "this would have gated but for what precedes it" tells a
     // reader more than "the first site's guard is unevaluable".
     let mut downgraded: Option<ModelPrediction> = None;
-    for site in &sem.sites {
+    for (n, site) in sem.sites.iter().enumerate() {
         let mut p = if !site.executed() {
             unreachable_site(site)
         } else {
@@ -173,15 +172,17 @@ pub fn predict(sem: &Semantics) -> ModelPrediction {
             }
         };
 
-        // A site's own guard is not the whole story: only the divergence source
-        // the witness pass actually attempted can be promoted.
+        // A site's own guard is not the whole story. Only one thing about the
+        // multi-site case is established well enough to predict with: if the
+        // first divergence source cannot be evaluated, nothing anywhere in the
+        // function is promoted.
         if let ExpectedStatic::Gating { code } = &p.expected
-            && witnessed_source(sem) != site.guards.divergence_source
+            && !in_the_witnessed_prefix(sem, n)
         {
             p = measured(
                 ExpectedStatic::WarningOnly { code: code.clone() },
-                "another_divergence_source_got_the_witness",
-                M_ONE_WITNESSED_SOURCE,
+                "outside_the_witnessed_prefix",
+                M_WITNESSED_PREFIX,
                 None,
             );
             downgraded = Some(p.clone());
@@ -207,20 +208,43 @@ pub fn predict(sem: &Semantics) -> ModelPrediction {
     }
 }
 
-/// The divergence source the witness pass attempted, if anything can be promoted.
+/// Whether the site at `index` falls inside the prefix of sites that share the
+/// function's first divergence source.
 ///
-/// The first per-thread condition in program order, skipping call sites -- a
-/// summary-based finding is never witness-replayed, so it is not an attempt.
-/// `None` when that first source is one the interpreter cannot evaluate, which is
-/// measured to leave nothing in the function promotable.
-fn witnessed_source(sem: &Semantics) -> Option<String> {
-    let first = sem.sites.iter().find(|s| {
-        s.executed() && s.guards.statically_divergent && s.guards.via_helper_depth == 0
-    })?;
+/// Call sites are skipped throughout: a summary-based finding is never
+/// witness-replayed, so reaching one is not an attempt, and a call site above an
+/// evaluable guard measurably does not suppress it.
+///
+/// Returns false for every site when that first source is one the interpreter
+/// cannot evaluate -- the prefix is then empty, and nothing in the function is
+/// promoted.
+fn in_the_witnessed_prefix(sem: &Semantics, index: usize) -> bool {
+    let candidates: Vec<(usize, &Site)> = sem
+        .sites
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| {
+            s.executed() && s.guards.statically_divergent && s.guards.via_helper_depth == 0
+        })
+        .collect();
+    let Some((_, first)) = candidates.first() else {
+        // Nothing per-thread encloses anything: no promotion is at stake.
+        return true;
+    };
     if first.guards.lane_env || first.guards.divergent_guard_inside_loop {
-        return None;
+        return false;
     }
-    first.guards.divergence_source.clone()
+    let source = &first.guards.divergence_source;
+    for (n, site) in &candidates {
+        if *n == index {
+            return &site.guards.divergence_source == source;
+        }
+        if &site.guards.divergence_source != source {
+            return false;
+        }
+    }
+    // Not a candidate site at all, so the prefix does not constrain it.
+    true
 }
 
 /// A construct present in the source that no thread of this launch reaches.
@@ -661,47 +685,24 @@ mod tests {
         }
     }
 
+    fn barrier_under(pred: Pred) -> Stmt {
+        Stmt::If { pred, body: vec![Stmt::Barrier] }
+    }
+
     #[test]
-    fn only_findings_sharing_the_witnessed_divergence_source_are_gated() {
+    fn an_unevaluable_first_source_suppresses_promotion_everywhere_below_it() {
         let lane_env = || Pred::Cmp(Value::WarpId, CmpOp::Eq, 0);
 
-        // Two barriers, two different sources. The first is attempted and gates;
-        // the second diverges for a different reason and only warns.
-        let two_sources = Kernel::new(vec![
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-            Stmt::If { pred: Pred::Not(Box::new(even())), body: vec![Stmt::Barrier] },
-        ]);
-        assert_eq!(
-            predict_kernel(&two_sources).expected,
-            ExpectedStatic::Gating { code: "RC001".into() },
-            "the first source is witnessed, so the case gates"
-        );
-
-        // Same two barriers, one source. Measured: both confirmed, two witnesses.
-        let one_source = Kernel::new(vec![
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-        ]);
-        assert_eq!(
-            predict_kernel(&one_source).expected,
-            ExpectedStatic::Gating { code: "RC001".into() }
-        );
-
-        // Lane-environment source FIRST: nothing in the function is promotable,
-        // so a confirmable barrier below it leaves the CI gate.
-        let blocked = Kernel::new(vec![
-            Stmt::If { pred: lane_env(), body: vec![Stmt::Barrier] },
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-        ]);
+        // Lane-environment source FIRST: the prefix is empty, so the confirmable
+        // barrier below it leaves the CI gate.
+        let blocked = Kernel::new(vec![barrier_under(lane_env()), barrier_under(even())]);
         let p = predict_kernel(&blocked);
         assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC001".into() });
+        assert_eq!(p.rule, "outside_the_witnessed_prefix");
         assert!(matches!(p.provenance, Provenance::Measured { .. }));
 
         // The same source SECOND: measured to change nothing.
-        let unaffected = Kernel::new(vec![
-            Stmt::If { pred: even(), body: vec![Stmt::Barrier] },
-            Stmt::If { pred: lane_env(), body: vec![Stmt::Barrier] },
-        ]);
+        let unaffected = Kernel::new(vec![barrier_under(even()), barrier_under(lane_env())]);
         assert_eq!(
             predict_kernel(&unaffected).expected,
             ExpectedStatic::Gating { code: "RC001".into() },
@@ -710,12 +711,41 @@ mod tests {
     }
 
     #[test]
-    fn the_held_out_case_that_refuted_the_previous_version_of_the_rule() {
+    fn promotion_reaches_a_prefix_of_one_source_and_stops_where_it_changes() {
+        // Two sites, one source: measured both confirmed, two witnesses.
+        let one_source = Kernel::new(vec![barrier_under(even()), barrier_under(even())]);
+        assert_eq!(
+            predict_kernel(&one_source).expected,
+            ExpectedStatic::Gating { code: "RC001".into() }
+        );
+
+        // A, B, A. The third site's source is the witnessed one and it is still
+        // not promoted -- the case that refuted the previous version of this
+        // rule. Only the leading A gates, so the kernel still gates.
+        let a_b_a = Kernel::new(vec![
+            barrier_under(even()),
+            barrier_under(Pred::Not(Box::new(even()))),
+            barrier_under(even()),
+        ]);
+        assert_eq!(
+            predict_kernel(&a_b_a).expected,
+            ExpectedStatic::Gating { code: "RC001".into() }
+        );
+        // ...and the third site individually is outside the prefix.
+        let sem = interpret(&a_b_a, Launch::one_block(32));
+        let third = sem.sites.len() - 1;
+        assert!(!in_the_witnessed_prefix(&sem, third));
+        assert!(in_the_witnessed_prefix(&sem, 0));
+    }
+
+    #[test]
+    fn the_held_out_collective_pair_is_predicted_at_warning_tier() {
         // Two collectives under complementary guards, both with mask 0x1. The
-        // first names only a lane that is present; the second names lane 0, which
-        // is absent there. The previous rule predicted gating on the second;
-        // measurement said warning on both, because the source that got the
-        // witness was the first one and nothing was wrong under it.
+        // first names only a lane that is present, so nothing is wrong under the
+        // witnessed source; the second names lane 0, which is absent there, but
+        // sits outside the prefix. Measured: warning on both. This case refuted
+        // the third version of the rule and is what a weaker fourth version got
+        // wrong in the other direction.
         let k = Kernel::new(vec![
             Stmt::If {
                 pred: even(),
@@ -730,6 +760,7 @@ mod tests {
         assert_eq!(sem.oracle, crate::oracle::ConstructionOracle::KnownMaskInvalid);
         let p = predict(&sem);
         assert_eq!(p.expected, ExpectedStatic::WarningOnly { code: "RC002".into() });
-        assert_eq!(p.rule, "another_divergence_source_got_the_witness");
+        assert_eq!(p.rule, "outside_the_witnessed_prefix");
     }
+
 }

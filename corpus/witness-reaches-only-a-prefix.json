@@ -1,0 +1,30 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "witness-reaches-only-a-prefix",
+  "finding": "A, B, A: the third site shares the witnessed source and is still not promoted",
+  "template_id": "barrier_divergent_intra_warp+complementary_guard@0+clone_guard_to_end@0.0",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [
+    "complementary_guard@0",
+    "clone_guard_to_end@0.0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "f493355236d3592c6e98928777d1048f875ef77c7ac792473a02ae61b01a9fa9",
+  "expected_signature": "rc001/confirmed,rc001/warning,rc001/warning|1w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "The case that refuted the third and fourth versions of the ordering rule. Minimized to three one-line guards; see cases-exp-a/*/minimized/MINIMIZED.md."
+}

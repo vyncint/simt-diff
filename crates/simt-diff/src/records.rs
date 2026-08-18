@@ -117,6 +117,29 @@ pub struct AnalyzerRecord {
     pub timed_out: bool,
 }
 
+impl AnalyzerRecord {
+    /// A canonical one-line summary of what the analyzer said, for comparing two
+    /// runs without comparing whole documents.
+    ///
+    /// This is the string a minimizer preserves and a regression check diffs, so
+    /// it has to include the witness count: `RC001/warning` and `RC001/warning`
+    /// with a witness artifact are different observations, and the difference is
+    /// exactly what several of this laboratory's findings are about.
+    pub fn signature(&self) -> String {
+        let mut parts: Vec<String> = self
+            .findings
+            .iter()
+            .filter(|f| crate::classify::CONVERGENCE_CODES.contains(&f.code.as_str()))
+            .map(|f| format!("{}/{:?}", f.code, f.confidence).to_lowercase())
+            .collect();
+        parts.sort();
+        if parts.is_empty() {
+            parts.push("silent".to_string());
+        }
+        format!("{}|{}w", parts.join(","), self.witnesses.len())
+    }
+}
+
 /// A `findings.v1` finding, deserialized permissively.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Finding {

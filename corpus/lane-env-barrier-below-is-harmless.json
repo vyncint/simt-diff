@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "lane-env-barrier-below-is-harmless",
+  "finding": "The same barrier added BELOW changes nothing: the effect is ordered, not function-wide",
+  "template_id": "barrier_divergent_intra_warp+add_lane_env_sibling@0.0",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [
+    "add_lane_env_sibling@0.0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "53c0a888f7462236d87d0c99c18795578047a5af7be5376739e4783d8f7485ca",
+  "expected_signature": "rc001/confirmed,rc001/warning|1w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "This case refuted the first version of the ordering rule. It exists to keep the claim narrow."
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "loop-inside-guard-is-promoted",
+  "finding": "The same two constructs nested the other way ARE promoted",
+  "template_id": "barrier_divergent_intra_warp+wrap_in_loop@0.0",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [
+    "wrap_in_loop@0.0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "c103c6a540e8d77312b98886b8b6174fcba7c40e8a45f55b8605389efdd308f8",
+  "expected_signature": "rc001/confirmed|1w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "The contrast that makes the loop finding precise: it is the nesting order, not the loop."
+}

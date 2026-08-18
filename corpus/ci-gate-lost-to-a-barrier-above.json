@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "ci-gate-lost-to-a-barrier-above",
+  "finding": "A warp_id()-guarded barrier ABOVE a confirmable one takes it out of the CI gate",
+  "template_id": "barrier_divergent_intra_warp+prepend_lane_env_sibling@0.0",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [
+    "prepend_lane_env_sibling@0.0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "9a526b56d46346e222a2c6a6f9d9b98131a48f5a28fc287af7d8ab2d9adcc311",
+  "expected_signature": "rc001/warning,rc001/warning|0w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "Undocumented. The confirmable barrier is byte-identical to the baseline entry; only the added barrier above it differs. If this becomes confirmed, reconverge fixed it."
+}

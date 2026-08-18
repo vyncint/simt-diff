@@ -321,6 +321,22 @@ pub fn mutations(kernel: &Kernel, launch: Launch) -> Vec<(String, Kernel)> {
             }
         }
 
+        // ---- the same guard again, at the end of the function --------------
+        // The discriminator for "which findings share the witnessed source". Two
+        // sites under one guard are both confirmed and two under different
+        // guards are not, but nothing yet says whether a *later* site sharing
+        // the first one's guard is promoted when a different guard sits between
+        // them. This operator builds exactly that: A, B, A.
+        if matches!(stmt, Stmt::Barrier | Stmt::CallHelper) && path.len() == 2 {
+            let mut k = kernel.clone();
+            if let Some(Stmt::If { .. }) = k.get(&path[..1]).cloned()
+                && let Some(clone) = k.get(&path[..1]).cloned()
+            {
+                k.stmts.push(clone);
+                push(format!("clone_guard_to_end@{tag}"), k);
+            }
+        }
+
         // ---- put the barrier behind a call ---------------------------------
         if matches!(stmt, Stmt::Barrier) {
             let mut k = kernel.clone();
@@ -605,6 +621,41 @@ pub fn record(m: &Mutant, seed: u64, launches: Vec<Launch>) -> GeneratorRecord {
     }
 }
 
+/// A record for a kernel that is not a corpus mutant -- a minimizer candidate,
+/// or anything else hand-built. The oracle and the prediction are computed the
+/// same way, so such a case is not a second-class citizen.
+pub fn record_for_kernel(kernel: &Kernel, id: &str, launch: Launch) -> GeneratorRecord {
+    let m = Mutant {
+        id: id.to_string(),
+        seed: id.to_string(),
+        lineage: Vec::new(),
+        kernel: kernel.clone(),
+    };
+    record(&m, 0, vec![launch])
+}
+
+/// Rebuild the record for a case whose recipe is known.
+///
+/// The lineage is not decoration: it is written into the generated kernel's doc
+/// comment, so a record rebuilt without it hashes differently. Comparing that
+/// hash against a stored one is how generator drift is detected, and getting
+/// this wrong made every rebuilt case look like drift.
+pub fn record_from_recipe(
+    template_id: &str,
+    seed_template: &str,
+    lineage: &[String],
+    kernel: &Kernel,
+    launch: Launch,
+) -> GeneratorRecord {
+    let m = Mutant {
+        id: template_id.to_string(),
+        seed: seed_template.to_string(),
+        lineage: lineage.to_vec(),
+        kernel: kernel.clone(),
+    };
+    record(&m, 0, vec![launch])
+}
+
 fn kernel_source(
     m: &Mutant,
     sem: &Semantics,
@@ -818,5 +869,37 @@ mod tests {
             ExpectedStatic::Gating { code: "RC001".into() },
             "a lane-environment barrier *after* a confirmable one leaves it gated"
         );
+    }
+
+    #[test]
+    fn cloning_a_guard_to_the_end_builds_the_a_b_a_shape() {
+        // From `if A { sync }` plus a complementary sibling, cloning the first
+        // guard to the end gives A, B, A -- three sites, two sources, and the
+        // one shape that separates "shares the witnessed source" from "is an
+        // unbroken prefix of it".
+        let a_b = mutations(&seed("barrier_divergent_intra_warp").unwrap(), L())
+            .into_iter()
+            .find(|(op, _)| op == "complementary_guard@0")
+            .unwrap()
+            .1;
+        let (_, a_b_a) = mutations(&a_b, L())
+            .into_iter()
+            .find(|(op, _)| op == "clone_guard_to_end@0.0")
+            .expect("the first guard can be cloned to the end");
+        let body = a_b_a.render_body();
+        let guards: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("if ") && !l.contains("out.get_mut"))
+            .collect();
+        assert_eq!(
+            guards,
+            vec![
+                "if i.get() % 2 == 0 {",
+                "if !(i.get() % 2 == 0) {",
+                "if i.get() % 2 == 0 {",
+            ]
+        );
+        assert_eq!(interpret(&a_b_a, L()).oracle, ConstructionOracle::KnownUnsafe);
     }
 }

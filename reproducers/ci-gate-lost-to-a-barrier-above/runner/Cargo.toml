@@ -1,0 +1,12 @@
+[package]
+name = "case-runner"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }

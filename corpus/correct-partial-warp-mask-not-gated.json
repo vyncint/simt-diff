@@ -1,0 +1,29 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "correct-partial-warp-mask-not-gated",
+  "finding": "The correct guarded partial-warp idiom is reported at warning tier and never gated",
+  "template_id": "collective_under_divergence+mask_match_participants@0.0",
+  "seed_template": "collective_under_divergence",
+  "lineage": [
+    "mask_match_participants@0.0"
+  ],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_MASK_VALID",
+  "kernel_sha256": "830cc82228a52d882742efbd85363205b3d23bf02c72989afb785f45c5316d27",
+  "expected_signature": "rc002/warning|0w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "Read literally, MUTATION.md predicts a gating RC002 here, which would be a false positive on a valid program. RC002 does mask arithmetic the docs say v1 does not. If this ever gates, precision regressed."
+}

@@ -28,6 +28,12 @@ Usage:
   simt-diff conformance [OPTS]            generate every case, analyze it, check
                                           each prediction and classify each result
   simt-diff show <case-dir>               print the case's verdict
+  simt-diff minimize <case-dir> [OPTS]    shrink a case while keeping what makes
+                                          it interesting
+  simt-diff package <case-dir> [OPTS]     write a standalone reproducer directory
+  simt-diff corpus add <case-dir> [OPTS]  record a case as a regression entry
+  simt-diff regress [OPTS]                rebuild every corpus entry and report
+                                          generator or analyzer drift
 
 generate options:
   --out <DIR>       parent directory for cases (default: ./cases)
@@ -58,7 +64,27 @@ mutate options:
 conformance options:
   --mutants         analyze the generated corpus instead of the hand-written
                     templates; the seeds are kept as depth-0 controls
+  --only <SUBSTR>   analyze only cases whose id contains SUBSTR, for running one
+                    targeted experiment instead of a sweep
   --depth/--limit/--seed/--block   as for `mutate`
+
+minimize options:
+  --out <DIR>       where candidates and MINIMIZED.md go (default: <case>/minimized)
+  --signature-only  preserve only the analyzer's answer, not the oracle. Reduces
+                    further, and will happily turn the case into a different
+                    program that reads the same.
+  --reconverge <PATH>
+
+package options:
+  --out <DIR>       reproducer directory (default: <case>/reproducer)
+  --finding <TEXT>  the one-line claim the package is evidence of
+
+corpus / regress options:
+  --corpus <DIR>    corpus directory (default: ./corpus)
+  --name <ID>       entry name (corpus add; default: the case's template id)
+  --finding <TEXT>  what the entry is evidence of (corpus add)
+  --note <TEXT>     why the expected signature is what it is (corpus add)
+  --reconverge <PATH>
 
 analyze options:
   --reconverge <PATH>   cargo-reconverge binary (or $SIMT_DIFF_RECONVERGE)
@@ -101,6 +127,10 @@ fn run(args: &[String]) -> Result<u8, String> {
         "ingest" => ingest(&args[1..]),
         "conformance" => conformance(&args[1..]),
         "compare" | "show" => compare(&args[1..]),
+        "minimize" => minimize_cmd(&args[1..]),
+        "package" => package_cmd(&args[1..]),
+        "corpus" => corpus_cmd(&args[1..]),
+        "regress" => regress_cmd(&args[1..]),
         other => Err(format!("unknown command `{other}`; try --help")),
     }
 }
@@ -445,6 +475,7 @@ fn conformance(args: &[String]) -> Result<u8, String> {
     let mut cli = locate_reconverge();
     let mut spec = CorpusSpec::default();
     let mut mutants = false;
+    let mut only: Option<String> = None;
     let mut passthrough = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -455,6 +486,7 @@ fn conformance(args: &[String]) -> Result<u8, String> {
             "--out" => { out = PathBuf::from(value(i)?); i += 2 }
             "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
             "--mutants" => { mutants = true; i += 1 }
+            "--only" => { only = Some(value(i)?); i += 2 }
             other => { passthrough.push(other.to_string()); i += 1 }
         }
     }
@@ -468,7 +500,7 @@ fn conformance(args: &[String]) -> Result<u8, String> {
 
     // The hand-written templates and the generated corpus produce the same kind
     // of record, so one loop serves both and the two are directly comparable.
-    let records: Vec<GeneratorRecord> = if mutants {
+    let mut records: Vec<GeneratorRecord> = if mutants {
         build_corpus(&spec)
             .iter()
             .map(|m| simt_diff::mutate::record(m, spec.seed, vec![launch]))
@@ -476,6 +508,18 @@ fn conformance(args: &[String]) -> Result<u8, String> {
     } else {
         templates::TEMPLATES.iter().map(|t| t.record(0, vec![launch])).collect()
     };
+    if let Some(substr) = &only {
+        let before = records.len();
+        records.retain(|r| r.template_id.contains(substr.as_str()));
+        eprintln!(
+            "note: --only {substr} kept {} of {before} case(s); the rest were not \
+             analyzed",
+            records.len()
+        );
+        if records.is_empty() {
+            return Err(format!("no case id contains `{substr}`"));
+        }
+    }
 
     let started = std::time::Instant::now();
     let mut rows: Vec<Row> = Vec::new();
@@ -690,7 +734,396 @@ fn summarize(rows: &[Row]) -> serde_json::Value {
     })
 }
 
+
+// ---------------------------------------------------------------- minimize ---
+
+/// Read the two records a later stage needs from a case directory.
+fn load_case(root: &Path) -> Result<(GeneratorRecord, AnalyzerRecord), String> {
+    let read = |name: &str| -> Result<String, String> {
+        std::fs::read_to_string(root.join(name))
+            .map_err(|e| format!("{}: {e}", root.join(name).display()))
+    };
+    let generator: GeneratorRecord = serde_json::from_str(&read("generator.json")?)
+        .map_err(|e| format!("generator.json: {e}"))?;
+    let analyzer: AnalyzerRecord = serde_json::from_str(&read("analyzer.json")?)
+        .map_err(|e| format!("analyzer.json: {e}; run `simt-diff analyze` first"))?;
+    Ok((generator, analyzer))
+}
+
+/// Rebuild the IR for a case from the recipe in its record.
+///
+/// The kernel source is stored, but source is not what a minimizer reduces --
+/// the IR is. Rebuilding from the lineage and checking the hash is also how a
+/// generator change gets caught here rather than silently minimizing a different
+/// program.
+fn kernel_of(record: &GeneratorRecord) -> Result<simt_diff::ir::Kernel, String> {
+    let basis = record
+        .prediction_basis
+        .as_ref()
+        .ok_or("this case has no generator recipe; only generated cases can be minimized")?;
+    let launch = record.launches.first().copied().unwrap_or(Launch::one_block(32));
+    let entry = simt_diff::corpus::CorpusEntry {
+        schema: simt_diff::corpus::SCHEMA.to_string(),
+        name: record.template_id.clone(),
+        finding: String::new(),
+        template_id: record.template_id.clone(),
+        seed_template: basis.seed_template.clone(),
+        lineage: basis.mutation_lineage.clone(),
+        launch,
+        oracle: record.oracle,
+        kernel_sha256: record.kernel_sha256.clone(),
+        expected_signature: String::new(),
+        analyzer_version: String::new(),
+        measured_on: String::new(),
+        note: String::new(),
+    };
+    let kernel = simt_diff::corpus::regenerate(&entry)?;
+    let rebuilt = simt_diff::mutate::record_from_recipe(
+        &record.template_id,
+        &basis.seed_template,
+        &basis.mutation_lineage,
+        &kernel,
+        launch,
+    );
+    if rebuilt.kernel_sha256 != record.kernel_sha256 {
+        return Err(format!(
+            "the recipe for `{}` no longer rebuilds the same kernel; the generator \
+             changed since this case was written",
+            record.template_id
+        ));
+    }
+    Ok(kernel)
+}
+
+fn minimize_cmd(args: &[String]) -> Result<u8, String> {
+    let root = PathBuf::from(args.first().ok_or("minimize needs a case directory")?);
+    let mut out: Option<PathBuf> = None;
+    let mut signature_only = false;
+    let mut cli = locate_reconverge();
+    let mut i = 1;
+    while i < args.len() {
+        let value = |i: usize| -> Result<String, String> {
+            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+        };
+        match args[i].as_str() {
+            "--out" => { out = Some(PathBuf::from(value(i)?)); i += 2 }
+            "--signature-only" => { signature_only = true; i += 1 }
+            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
+            other => return Err(format!("unrecognized argument `{other}`")),
+        }
+    }
+    let cli = cli.ok_or("cargo-reconverge not found; set SIMT_DIFF_RECONVERGE")?;
+    let (record, analysis) = load_case(&root)?;
+    let kernel = kernel_of(&record)?;
+    let launch = record.launches.first().copied().unwrap_or(Launch::one_block(32));
+    let sem = simt_diff::interpret::interpret(&kernel, launch);
+
+    let property = if signature_only {
+        simt_diff::minimize::Property::Signature { signature: analysis.signature() }
+    } else {
+        simt_diff::minimize::Property::of(&sem, &analysis)
+    };
+    let workdir = out.unwrap_or_else(|| root.join("minimized"));
+    std::fs::create_dir_all(&workdir).map_err(|e| e.to_string())?;
+
+    eprintln!("preserving: {}", property.describe());
+    let analyzer = ReconvergeAnalyzer::new(cli);
+    let minimizer = simt_diff::minimize::Minimizer {
+        analyzer: &analyzer,
+        workdir: workdir.clone(),
+        launch,
+        property: property.clone(),
+        device_dep: DeviceDep::default(),
+    };
+    let outcome = minimizer.run(&kernel)?;
+    simt_diff::minimize::write_report(&workdir, &outcome, &property)
+        .map_err(|e| e.to_string())?;
+
+    println!(
+        "{} -> {} nodes in {} step(s), {} analyzer run(s)",
+        outcome.start_size,
+        outcome.end_size,
+        outcome.accepted.len(),
+        outcome.analyses
+    );
+    for a in &outcome.accepted {
+        println!("  applied {a}");
+    }
+    println!();
+    println!("{}", outcome.kernel.render_body());
+    println!();
+    println!("{}", workdir.join("MINIMIZED.md").display());
+    Ok(0)
+}
+
+// ----------------------------------------------------------------- package ---
+
+fn package_cmd(args: &[String]) -> Result<u8, String> {
+    let root = PathBuf::from(args.first().ok_or("package needs a case directory")?);
+    let mut out: Option<PathBuf> = None;
+    let mut finding: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        let value = |i: usize| -> Result<String, String> {
+            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+        };
+        match args[i].as_str() {
+            "--out" => { out = Some(PathBuf::from(value(i)?)); i += 2 }
+            "--finding" => { finding = Some(value(i)?); i += 2 }
+            other => return Err(format!("unrecognized argument `{other}`")),
+        }
+    }
+    let (record, analysis) = load_case(&root)?;
+    let verdict = classify(&Evidence {
+        generator: &record,
+        analyzer: &analysis,
+        runs: &[],
+        sanitizer: &[],
+    });
+    let dir = out.unwrap_or_else(|| root.join("reproducer"));
+    let finding = finding.unwrap_or_else(|| {
+        format!(
+            "{}: expected {:?}, observed {}",
+            record.template_id,
+            record.expected_static,
+            analysis.signature()
+        )
+    });
+    simt_diff::package::write(
+        &dir,
+        &simt_diff::package::Packaging {
+            record: &record,
+            analysis: &analysis,
+            verdict: &verdict,
+            finding: &finding,
+            toolchain: toolchain_pin(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    println!("{}", dir.display());
+    println!("  ./verify.sh exits nonzero if the observation moves");
+    Ok(0)
+}
+
+/// The pin from rust-toolchain.toml, so a package says where it was measured.
+fn toolchain_pin() -> String {
+    let text = std::fs::read_to_string("rust-toolchain.toml").unwrap_or_default();
+    for line in text.lines() {
+        if let Some(rest) = line.trim().strip_prefix("channel") {
+            return rest.trim_start_matches([' ', '=']).trim().trim_matches('"').to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
+// ------------------------------------------------------------------ corpus ---
+
+fn corpus_cmd(args: &[String]) -> Result<u8, String> {
+    match args.first().map(String::as_str) {
+        Some("add") => corpus_add(&args[1..]),
+        Some(other) => Err(format!("unknown corpus subcommand `{other}`; try `add`")),
+        None => Err("corpus needs a subcommand: add".to_string()),
+    }
+}
+
+fn corpus_add(args: &[String]) -> Result<u8, String> {
+    let root = PathBuf::from(args.first().ok_or("corpus add needs a case directory")?);
+    let mut dir = PathBuf::from("corpus");
+    let mut name: Option<String> = None;
+    let mut finding: Option<String> = None;
+    let mut note = String::new();
+    let mut i = 1;
+    while i < args.len() {
+        let value = |i: usize| -> Result<String, String> {
+            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+        };
+        match args[i].as_str() {
+            "--corpus" => { dir = PathBuf::from(value(i)?); i += 2 }
+            "--name" => { name = Some(value(i)?); i += 2 }
+            "--finding" => { finding = Some(value(i)?); i += 2 }
+            "--note" => { note = value(i)?; i += 2 }
+            other => return Err(format!("unrecognized argument `{other}`")),
+        }
+    }
+    let (record, analysis) = load_case(&root)?;
+    let basis = record
+        .prediction_basis
+        .as_ref()
+        .ok_or("only generated cases carry the recipe a corpus entry needs")?;
+    // Rebuild before recording, so an entry is never written that cannot be
+    // reproduced from its own recipe.
+    kernel_of(&record)?;
+
+    let entry = simt_diff::corpus::CorpusEntry {
+        schema: simt_diff::corpus::SCHEMA.to_string(),
+        name: name.unwrap_or_else(|| slug(&record.template_id)),
+        finding: finding.unwrap_or_else(|| record.template_id.clone()),
+        template_id: record.template_id.clone(),
+        seed_template: basis.seed_template.clone(),
+        lineage: basis.mutation_lineage.clone(),
+        launch: record.launches.first().copied().unwrap_or(Launch::one_block(32)),
+        oracle: record.oracle,
+        kernel_sha256: record.kernel_sha256.clone(),
+        expected_signature: analysis.signature(),
+        analyzer_version: analysis.version.clone(),
+        measured_on: today(),
+        note,
+    };
+    let path = simt_diff::corpus::write(&dir, &entry).map_err(|e| e.to_string())?;
+    println!("{}", path.display());
+    println!("  signature {}", entry.expected_signature);
+    Ok(0)
+}
+
+fn slug(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+/// UTC date, for the `measured_on` field. A recorded observation without a date
+/// is not a record of anything.
+fn today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = secs / 86_400;
+    let (mut y, mut d) = (1970i64, days as i64);
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let len = if leap { 366 } else { 365 };
+        if d < len {
+            break;
+        }
+        d -= len;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let months = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0;
+    while d >= months[m] {
+        d -= months[m];
+        m += 1;
+    }
+    format!("{y:04}-{:02}-{:02}", m + 1, d + 1)
+}
+
+fn regress_cmd(args: &[String]) -> Result<u8, String> {
+    let mut dir = PathBuf::from("corpus");
+    let mut work = PathBuf::from("cases-regress");
+    let mut cli = locate_reconverge();
+    let mut i = 0;
+    while i < args.len() {
+        let value = |i: usize| -> Result<String, String> {
+            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
+        };
+        match args[i].as_str() {
+            "--corpus" => { dir = PathBuf::from(value(i)?); i += 2 }
+            "--out" => { work = PathBuf::from(value(i)?); i += 2 }
+            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
+            other => return Err(format!("unrecognized argument `{other}`")),
+        }
+    }
+    let cli = cli.ok_or("cargo-reconverge not found; set SIMT_DIFF_RECONVERGE")?;
+    let analyzer = ReconvergeAnalyzer::new(cli);
+    let entries = simt_diff::corpus::load_dir(&dir)?;
+    if entries.is_empty() {
+        return Err(format!("no entries in {}", dir.display()));
+    }
+
+    let mut results = Vec::new();
+    for entry in &entries {
+        let (drift, detail) = regress_one(&analyzer, entry, &work);
+        eprintln!("  {:<44} {}", entry.name, drift.label());
+        results.push((entry, drift, detail));
+    }
+
+    println!();
+    println!("{:<44} {:<16} detail", "entry", "state");
+    println!("{}", "-".repeat(110));
+    for (entry, drift, detail) in &results {
+        println!("{:<44} {:<16} {detail}", entry.name, drift.label());
+    }
+
+    let moved: Vec<_> = results
+        .iter()
+        .filter(|(_, d, _)| *d != simt_diff::corpus::Drift::None)
+        .collect();
+    println!();
+    println!(
+        "{} entry(ies): {} unchanged, {} moved",
+        results.len(),
+        results.len() - moved.len(),
+        moved.len()
+    );
+    for (entry, drift, detail) in &moved {
+        println!();
+        println!("{}  {}", drift.label(), entry.name);
+        println!("    finding: {}", entry.finding);
+        println!("    measured {} with analyzer {}", entry.measured_on, entry.analyzer_version);
+        println!("    {detail}");
+        if !entry.note.is_empty() {
+            println!("    note: {}", entry.note);
+        }
+    }
+    Ok(u8::from(!moved.is_empty()))
+}
+
+fn regress_one(
+    analyzer: &ReconvergeAnalyzer,
+    entry: &simt_diff::corpus::CorpusEntry,
+    work: &Path,
+) -> (simt_diff::corpus::Drift, String) {
+    use simt_diff::corpus::Drift;
+
+    let kernel = match simt_diff::corpus::regenerate(entry) {
+        Ok(k) => k,
+        Err(e) => return (Drift::Broken, e),
+    };
+    let record = simt_diff::mutate::record_from_recipe(
+        &entry.template_id,
+        &entry.seed_template,
+        &entry.lineage,
+        &kernel,
+        entry.launch,
+    );
+    if record.kernel_sha256 != entry.kernel_sha256 {
+        return (
+            Drift::Generator,
+            format!(
+                "the recipe now builds a different kernel ({}… vs {}…)",
+                &record.kernel_sha256[..12],
+                &entry.kernel_sha256[..12]
+            ),
+        );
+    }
+    let dir = work.join(&entry.name);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return (Drift::Broken, e.to_string());
+    }
+    if let Err(e) = emit(&dir, &record, &DeviceDep::default(), &DeviceDep::default()) {
+        return (Drift::Broken, e.to_string());
+    }
+    let analysis = match analyzer.analyze(&dir.join("kernel")) {
+        Ok(a) => a,
+        Err(e) => return (Drift::Broken, e.to_string()),
+    };
+    let signature = analysis.signature();
+    if signature == entry.expected_signature {
+        (Drift::None, format!("signature {signature}"))
+    } else {
+        (
+            Drift::Analyzer,
+            format!("expected {}, got {signature}", entry.expected_signature),
+        )
+    }
+}
+
 // ------------------------------------------------------------------ ingest ---
+
 
 /// Record a run that happened on another host.
 ///

@@ -1,0 +1,12 @@
+[package]
+name = "case-kernel"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone on purpose: analyzed exactly the way a user's kernel
+# crate is. Kernel-only surface, so no host runtime and no driver.
+[workspace]
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }

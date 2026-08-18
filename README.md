@@ -21,9 +21,10 @@ agreement between those independent evidence sources.
 | 1 | [`docs/stage-1.md`](docs/stage-1.md) — one vertical slice end to end: real analyzer, real A10G |
 | 3 | [`docs/conformance-reconverge-0.1.6.md`](docs/conformance-reconverge-0.1.6.md) — fourteen hand-written templates, fourteen predictions held |
 | 4 | [`docs/stage-4.md`](docs/stage-4.md) — the mutation engine: oracles computed, not inherited |
+| 5 | [`docs/stage-5.md`](docs/stage-5.md) — minimizer, reproducer packaging, and a regression corpus that expires |
 
-Not built yet: the minimizer, reproducer packaging, the regression corpus, issue
-drafting, device-buffer tracing, and the launch matrix beyond one block size.
+Not built yet: issue drafting, device-buffer tracing, and the launch matrix beyond
+one block size — which is the only remaining piece that needs a GPU.
 
 ## Using it
 
@@ -40,7 +41,15 @@ simt-diff analyze <case-dir>      # run reconverge, record findings
 simt-diff ingest <case-dir> …     # record a GPU run performed on another host
 simt-diff compare <case-dir>      # classify from whatever records exist
 simt-diff conformance --mutants   # sweep the corpus: predict, analyze, classify
+simt-diff minimize <case-dir>     # shrink it, keeping oracle and signature fixed
+simt-diff package <case-dir>      # write a standalone reproducer with verify.sh
+simt-diff corpus add <case-dir>   # record it as a regression entry
+simt-diff regress                 # rebuild every entry, report analyzer or generator drift
 ```
+
+[`corpus/`](corpus/) holds nine entries: five findings, each paired with the case
+that bounds it, plus the control that proves the CI gate exists at all. `regress`
+exits nonzero the day one of them stops being true.
 
 `cargo-reconverge` is found on `PATH`, via `$SIMT_DIFF_RECONVERGE`, or with
 `--reconverge`. Exit codes: 0 ok, 1 something wants a human, 2 tool error.

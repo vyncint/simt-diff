@@ -1,0 +1,27 @@
+{
+  "schema": "simt-diff.corpus.v1",
+  "name": "gate-baseline-confirmable-barrier",
+  "finding": "The baseline: a divergent barrier under an evaluable guard is confirmed and gates CI",
+  "template_id": "barrier_divergent_intra_warp",
+  "seed_template": "barrier_divergent_intra_warp",
+  "lineage": [],
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "shared_mem_bytes": 0
+  },
+  "oracle": "KNOWN_UNSAFE",
+  "kernel_sha256": "ffc24cb23ac142185d94d9d66cf403b89510eed357ac40c0eaba6a9995833727",
+  "expected_signature": "rc001/confirmed|1w",
+  "analyzer_version": "0.1.6",
+  "measured_on": "2026-08-18",
+  "note": "The control for every entry below. If this one stops being confirmed, the gate itself moved and the other entries mean nothing."
+}
