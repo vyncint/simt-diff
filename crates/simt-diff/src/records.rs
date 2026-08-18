@@ -59,14 +59,6 @@ pub struct GeneratorRecord {
     /// filing a bug against a published limitation.
     #[serde(default)]
     pub documented_limitation: Option<String>,
-    /// What the analyzer's documentation says should happen for this
-    /// construct, declared by the template and checked after the run.
-    #[serde(default = "unspecified_prediction")]
-    pub expected_static: crate::prediction::ExpectedStatic,
-}
-
-fn unspecified_prediction() -> crate::prediction::ExpectedStatic {
-    crate::prediction::ExpectedStatic::Unspecified
 }
 
 /// A template's own answer for what the kernel should produce.

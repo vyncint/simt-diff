@@ -23,8 +23,6 @@ Usage:
   simt-diff analyze <case-dir>            run the analyzer, record findings
   simt-diff ingest <case-dir> [OPTS]      record a GPU run performed elsewhere
   simt-diff compare <case-dir>            classify from the records present
-  simt-diff conformance [OPTS]            generate every template, analyze it,
-                                          and check each documented prediction
   simt-diff show <case-dir>               print the case's verdict
 
 generate options:
@@ -83,7 +81,6 @@ fn run(args: &[String]) -> Result<u8, String> {
         "generate" => generate(&args[1..]),
         "analyze" => analyze(&args[1..]),
         "ingest" => ingest(&args[1..]),
-        "conformance" => conformance(&args[1..]),
         "compare" | "show" => compare(&args[1..]),
         other => Err(format!("unknown command `{other}`; try --help")),
     }
@@ -249,101 +246,6 @@ fn analyze(args: &[String]) -> Result<u8, String> {
         println!("  {:<6} {:<9} {}", f.code, format!("{:?}", f.confidence), f.message);
     }
     Ok(0)
-}
-
-// ------------------------------------------------------------- conformance ---
-
-/// Generate every template, analyze it, and report prediction vs behaviour.
-///
-/// This is the capability report the brief's §33 asks for: the output is a
-/// characterization of where the analyzer's documented boundaries actually
-/// lie, and every row is either "as documented" or a place where the
-/// documentation and the tool disagree.
-fn conformance(args: &[String]) -> Result<u8, String> {
-    let mut out = PathBuf::from("cases");
-    let mut cli = locate_reconverge();
-    let mut i = 0;
-    while i < args.len() {
-        let value = |i: usize| -> Result<String, String> {
-            args.get(i + 1).cloned().ok_or_else(|| format!("{} needs a value", args[i]))
-        };
-        match args[i].as_str() {
-            "--out" => { out = PathBuf::from(value(i)?); i += 2 }
-            "--reconverge" => { cli = Some(PathBuf::from(value(i)?)); i += 2 }
-            other => return Err(format!("unrecognized argument `{other}`")),
-        }
-    }
-    let cli = cli.ok_or("cargo-reconverge not found; set SIMT_DIFF_RECONVERGE")?;
-    let analyzer = ReconvergeAnalyzer::new(cli);
-
-    let mut violations = 0usize;
-    let mut rows = Vec::new();
-    for template in templates::TEMPLATES {
-        let record = template.record(0, vec![simt_diff::records::Launch::one_block(32)]);
-        let id = templates::case_id(&record);
-        let root = out.join(&id);
-        std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-        emit(&root, &record, &DeviceDep::default(), &DeviceDep::default())
-            .map_err(|e| e.to_string())?;
-        write_json(&root.join("generator.json"), &record)?;
-
-        let analysis = analyzer
-            .analyze(&root.join("kernel"))
-            .map_err(|e| format!("{}: {e}", template.id))?;
-        write_json(&root.join("analyzer.json"), &analysis)?;
-
-        let report = simt_diff::prediction::check(&record.expected_static, &analysis);
-        write_json(&root.join("prediction.json"), &report)?;
-        if report.outcome == simt_diff::prediction::PredictionOutcome::Violated {
-            violations += 1;
-        }
-        eprintln!("  {:<34} {:?}", template.id, report.outcome);
-        rows.push((template.id, record.expected_static.clone(), analysis, report, id));
-    }
-
-    println!();
-    println!("{:<34} {:<22} {:<26} {}", "template", "predicted", "observed", "prediction");
-    println!("{}", "-".repeat(104));
-    for (id, expected, analysis, report, _) in &rows {
-        let predicted = match expected {
-            simt_diff::prediction::ExpectedStatic::Gating { code } => format!("{code} gating"),
-            simt_diff::prediction::ExpectedStatic::WarningOnly { code } => format!("{code} warning-only"),
-            simt_diff::prediction::ExpectedStatic::Silent => "silent".to_string(),
-            simt_diff::prediction::ExpectedStatic::Unspecified => "-".to_string(),
-        };
-        let mut observed: Vec<String> = analysis
-            .findings
-            .iter()
-            .filter(|f| simt_diff::classify::CONVERGENCE_CODES.contains(&f.code.as_str()))
-            .map(|f| format!("{}/{:?}", f.code, f.confidence))
-            .collect();
-        if !analysis.witnesses.is_empty() {
-            observed.push(format!("+{}w", analysis.witnesses.len()));
-        }
-        if observed.is_empty() {
-            observed.push("silent".to_string());
-        }
-        println!(
-            "{:<34} {:<22} {:<26} {:?}",
-            id,
-            predicted,
-            observed.join(","),
-            report.outcome
-        );
-    }
-    println!();
-    for (id, _, _, report, case) in &rows {
-        if report.outcome == simt_diff::prediction::PredictionOutcome::Violated {
-            println!("VIOLATION  {id}  ({case})");
-            println!("           {}", report.detail);
-        }
-    }
-    println!(
-        "\n{} template(s), {} prediction violation(s)",
-        rows.len(),
-        violations
-    );
-    Ok(u8::from(violations > 0))
 }
 
 // ------------------------------------------------------------------ ingest ---

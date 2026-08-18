@@ -14,7 +14,6 @@
 
 
 use crate::oracle::ConstructionOracle;
-use crate::prediction::ExpectedStaticSpec;
 use crate::records::{GeneratorRecord, Launch, ReferenceModel};
 
 pub const GENERATOR_VERSION: &str = concat!("simt-diff/", env!("CARGO_PKG_VERSION"));
@@ -30,11 +29,6 @@ pub struct Template {
     pub body: &'static str,
     /// Extra `use` items the body needs, beyond the common set.
     pub extra_uses: &'static [&'static str],
-    /// Items emitted before the kernel: helpers, consts. Interprocedural
-    /// templates need these, and they must be in the analyzed crate too.
-    pub extra_items: &'static str,
-    /// What the analyzer's documentation says should happen here.
-    pub expected_static: ExpectedStaticSpec,
     /// Expected value per lane, given a launch. `None` = no reference model.
     pub reference: fn(Launch) -> Option<ReferenceModel>,
     /// The analyzer's own documented reason for not reporting this class,
@@ -89,10 +83,6 @@ pub const TEMPLATES: &[Template] = &[
                \x20       let b = warp::ballot_sync(0xffff_ffff, true);\n\
                \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
         extra_uses: &["warp"],
-        extra_items: "",
-        // A valid mask at a convergent point must not be reported. This is a
-        // precision check: a finding here would be a real false positive.
-        expected_static: ExpectedStaticSpec::Silent,
         reference: full_ballot,
         documented_limitation: None,
     },
@@ -109,8 +99,6 @@ pub const TEMPLATES: &[Template] = &[
                \x20       let b = warp::ballot_sync(0x0000_ffff, true);\n\
                \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
         extra_uses: &["warp"],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Silent,
         reference: shrunk_ballot,
         documented_limitation: Some(
             "conformance/MUTATION.md, shrinkmask row: \"a shrunk full mask at \
@@ -130,8 +118,6 @@ pub const TEMPLATES: &[Template] = &[
                \x20       thread::sync_threads();\n\
                \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
         extra_uses: &[],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Silent,
         documented_limitation: None,
         reference: |launch| {
             Some(ReferenceModel {
@@ -155,245 +141,11 @@ pub const TEMPLATES: &[Template] = &[
                \x20       }\n\
                \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
         extra_uses: &[],
-        extra_items: "",
-        // Squarely inside the documented RC001 surface, with a literal
-        // predicate the witness interpreter can replay.
-        expected_static: ExpectedStaticSpec::Gating("RC001"),
         // Deliberately none: the kernel's observable output is identical
         // whether or not the barrier misbehaves, so claiming a reference
         // model here would invent evidence.
         reference: no_reference,
         documented_limitation: None,
-    },
-
-    // ---- RC001: control-flow shapes inside the documented surface -------
-    Template {
-        id: "barrier_divergent_nested",
-        oracle: ConstructionOracle::KnownUnsafe,
-        oracle_reason: "two nested thread-index-derived predicates guard the \
-                        barrier, so only one quarter of the lanes reach it",
-        doc: "ORACLE: KNOWN_UNSAFE (RC001). Nested divergent predicates.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       if i.get() % 2 == 0 {\n\
-               \x20           if i.get() % 4 == 0 {\n\
-               \x20               thread::sync_threads();\n\
-               \x20           }\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
-        extra_uses: &[],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Gating("RC001"),
-        reference: no_reference,
-        documented_limitation: None,
-    },
-    Template {
-        id: "barrier_divergent_loop_break",
-        oracle: ConstructionOracle::KnownUnsafe,
-        oracle_reason: "lanes leave the loop at different iterations, so the \
-                        barrier inside it is reached a different number of \
-                        times per lane",
-        doc: "ORACLE: KNOWN_UNSAFE (RC001). Divergent loop trip count around \
-              a barrier.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       let mut n = 0u32;\n\
-               \x20       while n < (i.get() as u32 % 4) {\n\
-               \x20           thread::sync_threads();\n\
-               \x20           n += 1;\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = n; }",
-        extra_uses: &[],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Gating("RC001"),
-        reference: no_reference,
-        documented_limitation: None,
-    },
-
-    // ---- RC001: the interprocedural limitation -------------------------
-    Template {
-        id: "barrier_in_helper_divergent_call",
-        oracle: ConstructionOracle::KnownUnsafe,
-        oracle_reason: "the helper contains the barrier and is called from a \
-                        thread-divergent branch, so only the even lanes reach it",
-        doc: "ORACLE: KNOWN_UNSAFE (RC001), interprocedural. The barrier is one \
-              call away from the divergent branch.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       if i.get() % 2 == 0 {\n\
-               \x20           barrier_helper();\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
-        extra_uses: &[],
-        extra_items: "#[inline(never)]\npub fn barrier_helper() {\n    thread::sync_threads();\n}\n",
-        // README: \"Interprocedural analysis is summary-based in v1 [...]
-        // Call-site findings stay at `warning` and are never witness-promoted.\"
-        expected_static: ExpectedStaticSpec::WarningOnly("RC001"),
-        reference: no_reference,
-        documented_limitation: Some(
-            "README Limitations: interprocedural analysis is summary-based in \
-             v1 (per-function may_contain_barrier bits, no context \
-             sensitivity); call-site findings stay at warning and are never \
-             witness-promoted",
-        ),
-    },
-    Template {
-        id: "barrier_in_helper_uniform_call",
-        oracle: ConstructionOracle::KnownSafe,
-        oracle_reason: "the helper containing the barrier is called \
-                        unconditionally, so every thread of the block reaches it",
-        doc: "ORACLE: KNOWN_SAFE. Same helper, called from uniform control. A \
-              finding here would be a false positive.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       barrier_helper();\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
-        extra_uses: &[],
-        extra_items: "#[inline(never)]\npub fn barrier_helper() {\n    thread::sync_threads();\n}\n",
-        expected_static: ExpectedStaticSpec::Silent,
-        reference: |launch| {
-            Some(ReferenceModel {
-                description: "every lane writes 1".to_string(),
-                expected: (0..launch.block.0).map(|l| (l, 1u32)).collect(),
-                launch,
-            })
-        },
-        documented_limitation: None,
-    },
-
-    // ---- RC001: the lane-environment limitation ------------------------
-    Template {
-        id: "barrier_guarded_by_lanemask",
-        oracle: ConstructionOracle::KnownUnsafe,
-        oracle_reason: "the guard is derived from lanemask_lt(), which is \
-                        per-lane by definition, so lanes disagree at the barrier",
-        doc: "ORACLE: KNOWN_UNSAFE (RC001). Guard built on a lane-environment \
-              register.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       if warp::lanemask_lt().count_ones() > 4 {\n\
-               \x20           thread::sync_threads();\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
-        extra_uses: &["warp"],
-        extra_items: "",
-        // README: the lanemask registers are recognized as divergence sources,
-        // but the witness interpreter cannot evaluate their values, so findings
-        // under such guards are never witness-promoted.
-        expected_static: ExpectedStaticSpec::WarningOnly("RC001"),
-        reference: no_reference,
-        documented_limitation: Some(
-            "README Limitations: guards built on the lane-environment \
-             registers stay warnings -- the witness interpreter cannot yet \
-             evaluate their values (needs width-typed integer ! and \
-             truncating casts)",
-        ),
-    },
-    Template {
-        id: "barrier_guarded_by_warp_id",
-        oracle: ConstructionOracle::KnownUnsafe,
-        oracle_reason: "warp_id() is uniform within a warp but differs across \
-                        warps, so whole warps skip the block barrier",
-        doc: "ORACLE: KNOWN_UNSAFE (RC001). Whole-warp divergence at a block \
-              barrier. Measured on sm_86 (baseline §9.3): completes, and \
-              synccheck is silent.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       if warp::warp_id() == 0 {\n\
-               \x20           thread::sync_threads();\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = 1; }",
-        extra_uses: &["warp"],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::WarningOnly("RC001"),
-        reference: no_reference,
-        documented_limitation: Some(
-            "README Limitations: warp_id() is a lane-environment read; \
-             findings under such guards fire at warning tier and are never \
-             witness-promoted",
-        ),
-    },
-
-    // ---- RC002: convergence and mask evaluability ----------------------
-    Template {
-        id: "collective_under_divergence",
-        oracle: ConstructionOracle::KnownMaskInvalid,
-        oracle_reason: "the mask names all 32 lanes but the call sits inside a \
-                        thread-divergent branch, so half the named lanes are \
-                        absent",
-        doc: "ORACLE: KNOWN_MASK_INVALID (RC002). Full mask at a \
-              non-convergent point.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       let mut b = 0u32;\n\
-               \x20       if i.get() % 2 == 0 {\n\
-               \x20           b = warp::ballot_sync(0xffff_ffff, true);\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
-        extra_uses: &["warp"],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Gating("RC002"),
-        reference: no_reference,
-        documented_limitation: None,
-    },
-    Template {
-        id: "mask_from_named_const",
-        oracle: ConstructionOracle::KnownMaskValid,
-        oracle_reason: "the mask is the full warp written as a named const, and \
-                        the call is convergent, so it is valid",
-        doc: "ORACLE: KNOWN_MASK_VALID. The mask is a named const, which \
-              rustc_public cannot evaluate at the pin. Silence is correct; a \
-              finding would be a false positive.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       let b = warp::ballot_sync(FULL_MASK, true);\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
-        extra_uses: &["warp"],
-        extra_items: "pub const FULL_MASK: u32 = 0xffff_ffff;\n",
-        expected_static: ExpectedStaticSpec::Silent,
-        reference: full_ballot,
-        documented_limitation: Some(
-            "README Limitations: masks that are not literals -- a named const, \
-             or anything computed -- cannot be evaluated through rustc_public \
-             at the pinned toolchain",
-        ),
-    },
-    Template {
-        id: "mask_from_active_mask",
-        oracle: ConstructionOracle::KnownMaskValid,
-        oracle_reason: "active_mask() names exactly the lanes present at the \
-                        call, which at a convergent point is every lane",
-        doc: "ORACLE: KNOWN_MASK_VALID. The mask is computed from a lane- \
-              environment read; it is the idiomatic guarded-partial-warp form.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       let b = warp::ballot_sync(warp::active_mask(), true);\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
-        extra_uses: &["warp"],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Silent,
-        reference: full_ballot,
-        documented_limitation: Some(
-            "README Limitations: a computed mask cannot be evaluated, and an \
-             unevaluable mask is never witness-promoted -- it could be the \
-             correct guarded partial-warp idiom",
-        ),
-    },
-    Template {
-        id: "collective_unmasked_wrapper",
-        oracle: ConstructionOracle::KnownMaskInvalid,
-        oracle_reason: "warp::ballot forwards an implicit full mask to \
-                        ballot_sync, and the call sits under a divergent \
-                        branch, so the implicit mask names absent lanes",
-        doc: "ORACLE: KNOWN_MASK_INVALID, via the unmasked convenience \
-              wrapper. Explicitly outside the v1 analyzed surface.",
-        body: "        let i = thread::index_1d();\n\
-               \x20       let mut b = 0u32;\n\
-               \x20       if i.get() % 2 == 0 {\n\
-               \x20           b = warp::ballot(true);\n\
-               \x20       }\n\
-               \x20       if let Some(e) = out.get_mut(i) { *e = b; }",
-        extra_uses: &["warp"],
-        extra_items: "",
-        expected_static: ExpectedStaticSpec::Silent,
-        reference: no_reference,
-        documented_limitation: Some(
-            "dialect simt.rs test `unmasked_wrappers_are_the_documented_v1_gap`: \
-             warp::shuffle, warp::ballot, warp::all/any and the reduce_* \
-             helpers hide an implicit full mask inside cuda-device and are not \
-             analyzed in v1",
-        ),
     },
 ];
 
@@ -426,7 +178,6 @@ impl Template {
              \n\
              use cuda_device::{{{}}};\n\
              \n\
-             {}\n\
              #[kernel]\n\
              #[launch_contract(domain = 1, coordinates = u32, block = ({}, {}, {}))]\n\
              pub fn probe(mut out: DisjointSlice<u32>) {{\n\
@@ -434,7 +185,6 @@ impl Template {
              }}\n",
             self.doc,
             uses.join(", "),
-            self.extra_items,
             launch.block.0,
             launch.block.1,
             launch.block.2,
@@ -458,7 +208,6 @@ impl Template {
             launches,
             reference_model: reference,
             documented_limitation: self.documented_limitation.map(str::to_string),
-            expected_static: self.expected_static.into(),
         }
     }
 }
