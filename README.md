@@ -22,9 +22,10 @@ agreement between those independent evidence sources.
 | 3 | [`docs/conformance-reconverge-0.1.6.md`](docs/conformance-reconverge-0.1.6.md) — fourteen hand-written templates, fourteen predictions held |
 | 4 | [`docs/stage-4.md`](docs/stage-4.md) — the mutation engine: oracles computed, not inherited |
 | 5 | [`docs/stage-5.md`](docs/stage-5.md) — minimizer, reproducer packaging, and a regression corpus that expires |
+| 6 | [`docs/stage-6.md`](docs/stage-6.md) — the launch matrix: where a `warp_id()` guard stops being safe |
 
-Not built yet: issue drafting, device-buffer tracing, and the launch matrix beyond
-one block size — which is the only remaining piece that needs a GPU.
+Not built yet: device-buffer tracing, grid and multi-dimensional launches, and the
+*dynamic* half of the launch matrix — the only remaining piece that needs a GPU.
 
 ## Using it
 
@@ -45,7 +46,14 @@ simt-diff minimize <case-dir>     # shrink it, keeping oracle and signature fixe
 simt-diff package <case-dir>      # write a standalone reproducer with verify.sh
 simt-diff corpus add <case-dir>   # record it as a regression entry
 simt-diff regress                 # rebuild every entry, report analyzer or generator drift
+just matrix                       # the same corpus at block 32, 64 and 128
 ```
+
+Two scheduled workflows watch the analyzer rather than this repository:
+[`scan`](.github/workflows/scan.yml) rebuilds reconverge from `main` daily and
+re-runs the corpus, and [`scan-matrix`](.github/workflows/scan-matrix.yml) runs
+the full sweep across the launch matrix weekly. A recorded observation that stops
+being true files itself as an issue, once per drifting commit.
 
 [`corpus/`](corpus/) holds nine entries: five findings, each paired with the case
 that bounds it, plus the control that proves the CI gate exists at all. `regress`

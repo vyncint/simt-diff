@@ -56,7 +56,7 @@ jobs:
         run: |
           set +e
           cargo run --quiet -p simt-diff -- conformance --mutants --depth 1 \
-            --block ${{ matrix.block }} --out "$RUNNER_TEMP/cases-${{ matrix.block }}" \
+            --block ${{ matrix.block }} --out "cases-${{ matrix.block }}" \
             > sweep.txt 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           tail -n 60 sweep.txt
@@ -87,7 +87,7 @@ jobs:
           name: sweep-block${{ matrix.block }}-${{ steps.analyzer.outputs.sha }}
           path: |
             sweep.txt
-            ${{ runner.temp }}/cases-${{ matrix.block }}/conformance.json
+            cases-${{ matrix.block }}/conformance.json
           if-no-files-found: warn
 
       # A violated prediction is not automatically a failure: an extrapolated
