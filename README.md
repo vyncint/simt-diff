@@ -50,7 +50,7 @@ just matrix                       # the same corpus at block 32, 64 and 128
 ```
 
 Two scheduled workflows watch the analyzer rather than this repository:
-[`scan`](.github/workflows/scan.yml) rebuilds reconverge from `main` daily and
+[`scan`](.github/workflows/scan.yml) rebuilds reconverge from `main` hourly and
 re-runs the corpus, and [`scan-matrix`](.github/workflows/scan-matrix.yml) runs
 the full sweep across the launch matrix weekly. A recorded observation that stops
 being true files itself as an issue, once per drifting commit.
