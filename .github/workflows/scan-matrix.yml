@@ -25,6 +25,11 @@ on:
         description: git ref to scan instead of a published version
         required: false
         default: ""
+  # A reconverge release is worth the full twenty-minute matrix, not just the
+  # hourly nine:
+  #   gh api repos/vyncint/simt-diff/dispatches -f event_type=tool-published
+  repository_dispatch:
+    types: [tool-published]
 
 permissions:
   contents: read

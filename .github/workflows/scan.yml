@@ -39,6 +39,11 @@ on:
         description: git ref to scan instead of a published version
         required: false
         default: ""
+  # So a reconverge release can trigger a scan the moment it lands, instead of
+  # waiting out the rest of the hour:
+  #   gh api repos/vyncint/simt-diff/dispatches -f event_type=tool-published
+  repository_dispatch:
+    types: [tool-published]
 
 permissions:
   contents: read
@@ -57,7 +62,7 @@ jobs:
         uses: ./.github/actions/analyzer
         with:
           version: ${{ inputs.version || 'latest' }}
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || '' }}
 
       - name: Materialize this repository's toolchain
         run: |
