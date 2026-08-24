@@ -15,11 +15,22 @@ name: scan
 # git ref stays available on manual dispatch, for investigating something not yet
 # released.
 #
-# Hourly is affordable because the expensive part is cached: the analyzer build
-# is keyed on reconverge's commit, so an unchanged `main` restores it and only
-# the nine entries are re-analyzed. It is also only useful because drift is
-# reported once per drifting commit rather than once per run — at this cadence a
-# per-run report would be two dozen copies of the same issue in a day.
+# Daily, not hourly. The scan target is the newest *published* reconverge, and
+# reconverge publishes about once a month — so an hourly scan spent 730 runs a
+# month, 84% of all scheduled CI in the ecosystem, watching for an event that
+# happens twelve times a year. 729 of every 730 runs found the same version
+# they found an hour earlier.
+#
+# The cost was never the compute: the analyzer build is cached on reconverge's
+# commit, so an unchanged `main` restores it and only the nine entries are
+# re-analyzed. The cost is that a workflow firing every hour is a workflow
+# nobody reads, and drift is reported as an issue anyway rather than as a run.
+#
+# A publish should reach here as an event, not as a poll — `repository_dispatch`
+# below is exactly that, and the tool repos have a `notify-testing-repo` job for
+# it. It needs `TESTING_REPO_DISPATCH_TOKEN`, which is not set on any of them,
+# so this schedule is currently the only thing that keeps the corpus current.
+# Once the token exists, daily becomes a safety net rather than the mechanism.
 #
 # The fast, sharp signal lives here. The full launch matrix is weekly, in
 # scan-matrix.yml, because it costs twenty minutes rather than one.
@@ -28,7 +39,7 @@ on:
   schedule:
     # Offset from the top of the hour: :00 is the most contended slot on
     # GitHub's scheduler, and a delayed scan is a scan that reports late.
-    - cron: "28 * * * *"
+    - cron: "28 5 * * *"
   workflow_dispatch:
     inputs:
       version:
