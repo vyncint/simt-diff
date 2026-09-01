@@ -49,11 +49,13 @@ simt-diff regress                 # rebuild every entry, report analyzer or gene
 just matrix                       # the same corpus at block 32, 64 and 128
 ```
 
-Two scheduled workflows watch the analyzer rather than this repository:
-[`scan`](.github/workflows/scan.yml) rebuilds reconverge from `main` hourly and
+Two workflows watch the analyzer rather than this repository:
+[`scan`](.github/workflows/scan.yml) rebuilds reconverge from `main` and
 re-runs the corpus, and [`scan-matrix`](.github/workflows/scan-matrix.yml) runs
-the full sweep across the launch matrix weekly. A recorded observation that stops
-being true files itself as an issue, once per drifting commit.
+the full sweep across the launch matrix. A recorded observation that stops
+being true files itself as an issue, once per drifting commit. Both crons are
+commented out, so a sweep happens when it is asked for, or when a reconverge
+release sends `repository_dispatch`.
 
 [`corpus/`](corpus/) holds nine entries: five findings, each paired with the case
 that bounds it, plus the control that proves the CI gate exists at all. `regress`
