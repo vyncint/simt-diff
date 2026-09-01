@@ -13,8 +13,9 @@ name: scan-matrix
 # happens by hand; see docs/stage-6.md.
 
 on:
-  schedule:
-    - cron: "41 6 * * 1"
+  # Scheduled runs are disabled. Uncomment the block below to restore them.
+  # schedule:
+  #   - cron: "41 6 * * 1"
   workflow_dispatch:
     inputs:
       version:

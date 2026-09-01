@@ -29,17 +29,19 @@ name: scan
 # A publish should reach here as an event, not as a poll — `repository_dispatch`
 # below is exactly that, and the tool repos have a `notify-testing-repo` job for
 # it. It needs `TESTING_REPO_DISPATCH_TOKEN`, which is not set on any of them,
-# so this schedule is currently the only thing that keeps the corpus current.
-# Once the token exists, daily becomes a safety net rather than the mechanism.
+# and the daily schedule that covered that gap is disabled below — so nothing
+# keeps the corpus current on its own today. Until the token exists, this is a
+# workflow somebody has to run.
 #
 # The fast, sharp signal lives here. The full launch matrix is weekly, in
 # scan-matrix.yml, because it costs twenty minutes rather than one.
 
 on:
-  schedule:
-    # Offset from the top of the hour: :00 is the most contended slot on
-    # GitHub's scheduler, and a delayed scan is a scan that reports late.
-    - cron: "28 5 * * *"
+  # Scheduled runs are disabled. Uncomment the block below to restore them.
+  # schedule:
+  #   # Offset from the top of the hour: :00 is the most contended slot on
+  #   # GitHub's scheduler, and a delayed scan is a scan that reports late.
+  #   - cron: "28 5 * * *"
   workflow_dispatch:
     inputs:
       version:
